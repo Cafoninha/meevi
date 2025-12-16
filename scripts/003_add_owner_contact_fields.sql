@@ -1,0 +1,6 @@
+-- Add contact fields to owners table
+ALTER TABLE owners
+ADD COLUMN IF NOT EXISTS email TEXT,
+ADD COLUMN IF NOT EXISTS phone TEXT,
+ADD COLUMN IF NOT EXISTS location TEXT,
+ADD COLUMN IF NOT EXISTS photo_url TEXT;
