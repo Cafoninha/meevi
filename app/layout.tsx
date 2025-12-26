@@ -13,6 +13,15 @@ export const metadata: Metadata = {
   title: "Meevi - Seu Spitz Alemão",
   description: "O app completo para cuidar do seu Spitz Alemão",
   generator: "v0.app",
+  manifest: "/manifest.json",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Meevi",
+  },
+  formatDetection: {
+    telephone: false,
+  },
   icons: {
     icon: [
       {
@@ -39,11 +48,39 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="pt-BR">
+      <head>
+        <meta name="application-name" content="Meevi" />
+        <meta name="apple-mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+        <meta name="apple-mobile-web-app-title" content="Meevi" />
+        <meta name="format-detection" content="telephone=no" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="theme-color" content="#3b82f6" />
+        <link rel="manifest" href="/manifest.json" />
+      </head>
       <body className={`font-sans antialiased`}>
         <AuthProvider>
           <LanguageProvider>{children}</LanguageProvider>
         </AuthProvider>
         <Analytics />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+            if ('serviceWorker' in navigator) {
+              window.addEventListener('load', function() {
+                navigator.serviceWorker.register('/sw.js').then(
+                  function(registration) {
+                    console.log('[Meevi] Service Worker registrado com sucesso:', registration.scope);
+                  },
+                  function(err) {
+                    console.log('[Meevi] Falha ao registrar Service Worker:', err);
+                  }
+                );
+              });
+            }
+          `,
+          }}
+        />
       </body>
     </html>
   )

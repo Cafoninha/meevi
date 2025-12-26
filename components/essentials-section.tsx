@@ -239,7 +239,7 @@ const tabs = [
   { value: "guides", label: "Guia", icon: BookOpen },
 ]
 
-export function EssentialsSection() {
+function EssentialsSection() {
   const [activeTab, setActiveTab] = useState<TabType>("contacts")
   const [selectedCategory, setSelectedCategory] = useState<string>("all")
   const [searchQuery, setSearchQuery] = useState("")
@@ -563,8 +563,8 @@ export function EssentialsSection() {
           </div>
 
           {/* Category Filter */}
-          <div className="px-3 sm:px-4 md:px-6 pb-4 overflow-x-auto">
-            <div className="flex gap-2 min-w-max sm:min-w-0 sm:flex-wrap">
+          <div className="px-3 sm:px-4 md:px-6 pb-4">
+            <div className="grid grid-cols-2 sm:flex sm:flex-wrap gap-2">
               {categories.map((category) => {
                 const Icon = category.icon
                 return (
@@ -573,7 +573,7 @@ export function EssentialsSection() {
                     variant={selectedCategory === category.value ? "default" : "outline"}
                     size="sm"
                     onClick={() => setSelectedCategory(category.value)}
-                    className="flex-shrink-0 text-xs sm:text-sm"
+                    className="text-xs sm:text-sm justify-start sm:justify-center"
                   >
                     <Icon className="w-3.5 h-3.5 sm:w-4 sm:h-4 mr-1.5 sm:mr-2" />
                     {category.label}
@@ -994,3 +994,5 @@ function DocumentDialog({
     </Dialog>
   )
 }
+
+export default EssentialsSection

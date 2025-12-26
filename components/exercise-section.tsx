@@ -1,49 +1,52 @@
 "use client"
+
+import { useState, useEffect } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { useState, useEffect } from "react"
+import { Clock, Target, Zap, Brain, CheckCircle2, Trash2, Check, Trophy, Sparkles, Activity } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
-import { Clock, Target, Zap, Brain, CheckCircle2 } from "lucide-react"
+import { useDogs, useExercise, useDiaryEntries } from "@/lib/hooks/use-supabase-data"
+import { format } from "date-fns"
+import confetti from "canvas-confetti"
 
 interface ExerciseSectionProps {
   open: boolean
   onOpenChange: (open: boolean) => void
 }
 
-interface Dog {
-  id: string
-  name: string
-}
-
 export function ExerciseSection({ open, onOpenChange }: ExerciseSectionProps) {
-  const [dogs, setDogs] = useState<Dog[]>([])
   const [selectedDogId, setSelectedDogId] = useState<string>("all")
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [showSuccess, setShowSuccess] = useState(false)
+  const [newRecordId, setNewRecordId] = useState<string | null>(null)
   const { toast } = useToast()
 
-  useEffect(() => {
-    if (open) {
-      const storedDogs = localStorage.getItem("dogs")
-      if (storedDogs) {
-        const parsedDogs = JSON.parse(storedDogs)
-        setDogs(parsedDogs)
-        const savedDogSelection = localStorage.getItem("meevi_exercise_selected_dog")
-        if (savedDogSelection) {
-          setSelectedDogId(savedDogSelection)
-        }
-      }
-    }
-  }, [open])
+  const { dogs, loading: dogsLoading } = useDogs()
+  const { records, loading: recordsLoading, addRecord, deleteRecord } = useExercise()
+  const { addEntry: addDiaryEntry } = useDiaryEntries()
 
   useEffect(() => {
-    if (selectedDogId) {
-      localStorage.setItem("meevi_exercise_selected_dog", selectedDogId)
+    if (dogs.length > 0 && !selectedDogId) {
+      setSelectedDogId("all")
     }
-  }, [selectedDogId])
+  }, [dogs])
 
-  const handleExerciseComplete = (exerciseTitle: string, duration: string) => {
+  useEffect(() => {
+    if (newRecordId && records.some((r) => r.id === newRecordId)) {
+      confetti({
+        particleCount: 100,
+        spread: 70,
+        origin: { y: 0.6 },
+        colors: ["#f97316", "#fb923c", "#fdba74"],
+      })
+      setNewRecordId(null)
+    }
+  }, [records, newRecordId])
+
+  const handleExerciseComplete = async (exerciseTitle: string, duration: string) => {
     if (!selectedDogId || selectedDogId === "") {
       toast({
         title: "Selecione um cachorro",
@@ -53,53 +56,113 @@ export function ExerciseSection({ open, onOpenChange }: ExerciseSectionProps) {
       return
     }
 
-    const now = new Date()
-    const timeString = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`
-    const dateString = now.toISOString().split("T")[0]
+    setIsSubmitting(true)
+    setShowSuccess(false)
 
-    if (selectedDogId === "all") {
-      const diaryEntries = JSON.parse(localStorage.getItem("meevi_diary_entries") || "[]")
-      dogs.forEach((dog) => {
-        diaryEntries.unshift({
-          id: `${Date.now()}-${dog.id}`,
-          type: "exercise",
-          title: exerciseTitle,
-          description: `Duração: ${duration}`,
-          time: timeString,
-          date: dateString,
+    try {
+      const now = new Date()
+      const dogsToExercise = selectedDogId === "all" ? dogs : dogs.filter((d) => d.id === selectedDogId)
+
+      console.log("[v0] Registering exercise for dogs:", dogsToExercise.map((d) => d.name).join(", "))
+
+      for (const dog of dogsToExercise) {
+        const newRecord = await addRecord({
+          dog_id: dog.id,
+          exercise_type: exerciseTitle,
+          duration: duration,
+          exercise_time: now.toISOString(),
+          notes: `${exerciseTitle} concluído`,
+        })
+
+        if (newRecord && dogsToExercise.length === 1) {
+          setNewRecordId(newRecord.id)
+        }
+
+        await addDiaryEntry({
           dogId: dog.id,
           dogName: dog.name,
+          type: "exercise",
+          title: exerciseTitle,
+          notes: `Duração: ${duration}`,
+          date: format(now, "yyyy-MM-dd"),
+          time: format(now, "HH:mm"),
         })
-      })
-      localStorage.setItem("meevi_diary_entries", JSON.stringify(diaryEntries))
+      }
 
-      toast({
-        title: "Exercício registrado!",
-        description: `${exerciseTitle} registrado para todos os cachorros.`,
-      })
-    } else {
-      const selectedDog = dogs.find((dog) => dog.id === selectedDogId)
-      const diaryEntries = JSON.parse(localStorage.getItem("meevi_diary_entries") || "[]")
-      diaryEntries.unshift({
-        id: Date.now().toString(),
-        type: "exercise",
-        title: exerciseTitle,
-        description: `Duração: ${duration}`,
-        time: timeString,
-        date: dateString,
-        dogId: selectedDogId,
-        dogName: selectedDog?.name,
-      })
-      localStorage.setItem("meevi_diary_entries", JSON.stringify(diaryEntries))
+      setShowSuccess(true)
+      setTimeout(() => setShowSuccess(false), 2000)
 
+      const dogNames = dogsToExercise.map((d) => d.name).join(", ")
       toast({
-        title: "Exercício registrado!",
-        description: `${exerciseTitle} registrado para ${selectedDog?.name}.`,
+        title: "🎉 Exercício registrado!",
+        description: `${exerciseTitle} registrado para ${dogNames} às ${format(now, "HH:mm")}`,
+      })
+
+      console.log("[v0] Exercise record(s) added successfully!")
+    } catch (error) {
+      console.error("[v0] Error registering exercise:", error)
+      toast({
+        title: "Erro ao registrar",
+        description: "Não foi possível registrar o exercício. Tente novamente.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleDeleteRecord = async (id: string) => {
+    try {
+      await deleteRecord(id)
+      toast({
+        title: "Registro excluído",
+        description: "Registro de exercício excluído com sucesso.",
+      })
+    } catch (error) {
+      toast({
+        title: "Erro ao excluir",
+        description: "Não foi possível excluir o registro.",
+        variant: "destructive",
       })
     }
-
-    onOpenChange(false)
   }
+
+  const groupedRecords = records.reduce(
+    (acc, record) => {
+      const dog = dogs.find((d) => d.id === record.dog_id)
+      if (!dog) return acc
+
+      if (!acc[dog.name]) {
+        acc[dog.name] = []
+      }
+      acc[dog.name].push(record)
+      return acc
+    },
+    {} as Record<string, typeof records>,
+  )
+
+  const getTimeAgo = (exerciseTime: string) => {
+    const now = new Date()
+    const exercise = new Date(exerciseTime)
+    const diffMs = now.getTime() - exercise.getTime()
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
+    const diffDays = Math.floor(diffHours / 24)
+
+    if (diffDays > 0) {
+      return `${diffDays} dia${diffDays > 1 ? "s" : ""} atrás`
+    } else if (diffHours > 0) {
+      return `${diffHours} hora${diffHours > 1 ? "s" : ""} atrás`
+    } else {
+      const diffMins = Math.floor(diffMs / (1000 * 60))
+      return `${diffMins} minuto${diffMins > 1 ? "s" : ""} atrás`
+    }
+  }
+
+  const todayExercises = records.filter((r) => {
+    const recordDate = format(new Date(r.exercise_time), "yyyy-MM-dd")
+    const today = format(new Date(), "yyyy-MM-dd")
+    return recordDate === today
+  }).length
 
   const exercises = [
     {
@@ -133,7 +196,7 @@ export function ExerciseSection({ open, onOpenChange }: ExerciseSectionProps) {
       benefits: ["Exercício físico", "Obediência", "Vínculo com dono"],
     },
     {
-      title: "Treino de Obediência Básica",
+      title: "Treino de Obediência",
       duration: "10 minutos",
       difficulty: "Médio",
       icon: Brain,
@@ -204,36 +267,126 @@ export function ExerciseSection({ open, onOpenChange }: ExerciseSectionProps) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="text-xl">Treinos e Exercícios</DialogTitle>
+          <DialogTitle className="text-xl flex items-center gap-2">
+            Treinos e Exercícios
+            {todayExercises >= 2 && (
+              <span className="flex items-center gap-1 text-sm font-normal text-primary">
+                <Trophy className="w-4 h-4" />
+                {todayExercises} exercício{todayExercises > 1 ? "s" : ""} hoje!
+              </span>
+            )}
+          </DialogTitle>
           <p className="text-sm text-muted-foreground">Atividades físicas e mentais para seu Spitz Alemão</p>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
-          <Card className="p-4">
-            <label className="text-sm font-semibold mb-2 block">Selecione o cachorro:</label>
-            <Select value={selectedDogId} onValueChange={setSelectedDogId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Escolha um cachorro" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos os cachorros</SelectItem>
-                {dogs.map((dog) => (
-                  <SelectItem key={dog.id} value={dog.id}>
-                    {dog.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Card>
-
+          {/* Dog Selection */}
           <Card className="p-4 bg-primary/5 border-primary/20">
-            <h4 className="font-semibold text-sm mb-2">Recomendação Diária</h4>
-            <p className="text-xs text-muted-foreground">
-              Spitz Alemão precisa de 30-60 minutos de atividade física por dia, divididos em 2-3 sessões. Combine
-              exercícios físicos com estimulação mental para um cachorro equilibrado e feliz.
-            </p>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Selecione o cachorro</label>
+              <Select value={selectedDogId} onValueChange={setSelectedDogId} disabled={dogsLoading}>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder={dogsLoading ? "Carregando..." : "Escolha um cachorro"} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Todos os cachorros</SelectItem>
+                  {dogs.map((dog) => (
+                    <SelectItem key={dog.id} value={dog.id}>
+                      {dog.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                {selectedDogId === "all"
+                  ? "Registrar exercício para todos os cachorros"
+                  : "Selecione qual cachorro fez o exercício"}
+              </p>
+            </div>
           </Card>
 
+          {/* Exercise History */}
+          <Card className="p-4">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <h4 className="font-semibold text-sm">Histórico de Exercícios</h4>
+                {records.length > 0 && (
+                  <span className="text-xs text-muted-foreground">
+                    {records.length} registro{records.length > 1 ? "s" : ""}
+                  </span>
+                )}
+              </div>
+              {recordsLoading ? (
+                <p className="text-center text-sm text-muted-foreground py-2">Carregando histórico...</p>
+              ) : Object.keys(groupedRecords).length === 0 ? (
+                <p className="text-center text-sm text-muted-foreground py-2">Nenhum exercício registrado ainda</p>
+              ) : (
+                <div className="space-y-3">
+                  {Object.entries(groupedRecords).map(([dogName, dogRecords]) => (
+                    <div key={dogName} className="space-y-2">
+                      <div className="flex items-center gap-2 px-1">
+                        <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+                        <p className="text-sm font-semibold text-primary">{dogName}</p>
+                      </div>
+                      {dogRecords
+                        .sort((a, b) => new Date(b.exercise_time).getTime() - new Date(a.exercise_time).getTime())
+                        .slice(0, 5)
+                        .map((record, index) => (
+                          <Card
+                            key={record.id}
+                            className={`p-3 hover:bg-accent/50 transition-all duration-300 ${
+                              record.id === newRecordId ? "animate-in slide-in-from-top-2 bg-primary/10" : ""
+                            }`}
+                            style={{ animationDelay: `${index * 50}ms` }}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex-1 space-y-1">
+                                <div className="flex items-center gap-2">
+                                  <Activity className="w-3.5 h-3.5 text-primary" />
+                                  <span className="text-sm font-bold text-foreground">
+                                    {format(new Date(record.exercise_time), "HH:mm")}
+                                  </span>
+                                  <span className="text-xs text-muted-foreground">•</span>
+                                  <span className="text-xs text-muted-foreground">
+                                    {getTimeAgo(record.exercise_time)}
+                                  </span>
+                                </div>
+                                <p className="text-sm font-semibold pl-5">{record.exercise_type}</p>
+                                <p className="text-xs text-muted-foreground pl-5">Duração: {record.duration}</p>
+                              </div>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 text-muted-foreground hover:text-destructive flex-shrink-0"
+                                onClick={() => handleDeleteRecord(record.id)}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </Button>
+                            </div>
+                          </Card>
+                        ))}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </Card>
+
+          {/* Daily Recommendation */}
+          <Card className="p-4 bg-primary/5 border-primary/20">
+            <div className="flex items-start gap-3">
+              <Sparkles className="w-5 h-5 text-primary mt-0.5 flex-shrink-0" />
+              <div className="flex-1">
+                <h4 className="font-semibold text-sm mb-1">Recomendação Diária</h4>
+                <p className="text-xs text-muted-foreground">
+                  Spitz Alemão precisa de 30-60 minutos de atividade física por dia, divididos em 2-3 sessões. Combine
+                  exercícios físicos com estimulação mental para um cachorro equilibrado e feliz.
+                </p>
+              </div>
+            </div>
+          </Card>
+
+          {/* Exercise Cards */}
           <div className="space-y-3">
             {exercises.map((exercise, index) => {
               const Icon = exercise.icon
@@ -280,10 +433,20 @@ export function ExerciseSection({ open, onOpenChange }: ExerciseSectionProps) {
                         onClick={() => handleExerciseComplete(exercise.title, exercise.duration)}
                         variant="outline"
                         size="sm"
-                        className="w-full bg-transparent"
+                        className="w-full"
+                        disabled={isSubmitting || !selectedDogId}
                       >
-                        <CheckCircle2 className="w-4 h-4 mr-2" />
-                        Concluir {exercise.title}
+                        {showSuccess ? (
+                          <>
+                            <Check className="w-4 h-4 mr-2" />
+                            Registrado!
+                          </>
+                        ) : (
+                          <>
+                            <CheckCircle2 className="w-4 h-4 mr-2" />
+                            Concluir {exercise.title}
+                          </>
+                        )}
                       </Button>
                     </div>
                   </div>
@@ -292,6 +455,7 @@ export function ExerciseSection({ open, onOpenChange }: ExerciseSectionProps) {
             })}
           </div>
 
+          {/* Important Tips */}
           <Card className="p-4 bg-accent/50">
             <h4 className="font-semibold text-sm mb-2">Dicas Importantes</h4>
             <ul className="space-y-1 text-xs">
@@ -307,3 +471,5 @@ export function ExerciseSection({ open, onOpenChange }: ExerciseSectionProps) {
     </Dialog>
   )
 }
+
+export default ExerciseSection

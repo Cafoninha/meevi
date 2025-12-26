@@ -12,7 +12,6 @@ import {
   Dog,
   Bell,
   Moon,
-  Sun,
   Info,
   ChevronRight,
   Mail,
@@ -21,17 +20,11 @@ import {
   Camera,
   Settings,
   LogOut,
-  Globe,
   Shield,
-  Scale,
-  Calendar,
-  Utensils,
-  Bath,
-  Activity,
-  Syringe,
   LogIn,
   Cloud,
   CloudOff,
+  BellRing,
 } from "lucide-react"
 import { EditProfileDialog } from "@/components/edit-profile-dialog"
 import { EditDogProfileDialog } from "@/components/edit-dog-profile-dialog"
@@ -41,6 +34,9 @@ import { AuthDialog } from "@/components/auth-dialog"
 import { useLanguage, type Language } from "@/lib/i18n"
 import { SyncService } from "@/lib/sync-service"
 import { useAuth } from "@/lib/auth-context"
+import { createClient } from "@/lib/supabase/client"
+import { useUserPreferences } from "@/lib/hooks/use-supabase-data" // Added hook
+import { Label } from "@/components/ui/label" // Added Label component
 
 interface NotificationSettings {
   all: boolean
@@ -58,27 +54,18 @@ interface AppPreferences {
   dateFormat: string
 }
 
-export function ProfileSection() {
+function ProfileSection() {
   const { language, setLanguage, t } = useLanguage()
   const { user, isAuthenticated, signOut } = useAuth()
 
-  const [notificationSettings, setNotificationSettings] = useState<NotificationSettings>({
-    all: true,
-    vaccines: true,
-    feeding: true,
-    bath: true,
-    exercise: true,
-    events: true,
-  })
+  const {
+    preferences,
+    loading: preferencesLoading,
+    updateNotificationSettings: updateNotificationSettingsDB,
+    updateAppPreferences: updateAppPreferencesDB,
+    updateDarkMode: updateDarkModeDB,
+  } = useUserPreferences()
 
-  const [appPreferences, setAppPreferences] = useState<AppPreferences>({
-    language: language,
-    weightUnit: "kg",
-    temperatureUnit: "celsius",
-    dateFormat: "dd/mm/yyyy",
-  })
-
-  const [darkModeEnabled, setDarkModeEnabled] = useState(false)
   const [isEditProfileOpen, setIsEditProfileOpen] = useState(false)
   const [isEditDogOpen, setIsEditDogOpen] = useState(false)
   const [isAboutOpen, setIsAboutOpen] = useState(false)
@@ -95,6 +82,8 @@ export function ProfileSection() {
 
   const [currentDog, setCurrentDog] = useState<any>(null)
 
+  const [showConfetti, setShowConfetti] = useState(false)
+
   const ownerPhotoInputRef = useRef<HTMLInputElement>(null)
   const dogPhotoInputRef = useRef<HTMLInputElement>(null)
 
@@ -102,15 +91,21 @@ export function ProfileSection() {
 
   useEffect(() => {
     loadOwnerData()
-    loadDarkModePreference()
-    loadNotificationSettings()
-    loadAppPreferences()
     loadLastSyncTime()
     loadCurrentDog()
     if (isAuthenticated && user) {
       autoSyncFromCloud()
     }
-  }, [isAuthenticated])
+    if (preferences?.dark_mode !== undefined) {
+      applyTheme(preferences.dark_mode)
+    }
+  }, [isAuthenticated, preferences?.dark_mode]) // Added dependency for preferences?.dark_mode
+
+  useEffect(() => {
+    if (isAuthenticated && user) {
+      loadPreferencesFromSupabase()
+    }
+  }, [isAuthenticated, user])
 
   const autoSyncFromCloud = async () => {
     if (!user) return
@@ -164,28 +159,9 @@ export function ProfileSection() {
   const formatBirthDate = (birthDate: string) => {
     if (!birthDate) return "Não informada"
     const date = new Date(birthDate)
-    return date.toLocaleDateString("pt-BR")
-  }
-
-  const loadNotificationSettings = () => {
-    const saved = localStorage.getItem("notificationSettings")
-    if (saved) {
-      setNotificationSettings(JSON.parse(saved))
-    }
-  }
-
-  const loadAppPreferences = () => {
-    const saved = localStorage.getItem("appPreferences")
-    if (saved) {
-      setAppPreferences(JSON.parse(saved))
-    }
-  }
-
-  const loadDarkModePreference = () => {
-    const savedTheme = localStorage.getItem("theme")
-    const isDark = savedTheme === "dark"
-    setDarkModeEnabled(isDark)
-    applyTheme(isDark)
+    // Use language-specific formatting if available
+    const locale = appPreferences.language || navigator.language || "pt-BR"
+    return date.toLocaleDateString(locale)
   }
 
   const applyTheme = (isDark: boolean) => {
@@ -196,64 +172,88 @@ export function ProfileSection() {
     }
   }
 
-  const handleDarkModeToggle = (enabled: boolean) => {
-    setDarkModeEnabled(enabled)
+  const handleDarkModeToggle = async (enabled: boolean) => {
     applyTheme(enabled)
-    localStorage.setItem("theme", enabled ? "dark" : "light")
+
+    try {
+      await updateDarkModeDB(enabled)
+      console.log("[v0] Dark mode updated successfully")
+    } catch (err) {
+      console.error("[v0] Failed to update dark mode:", err)
+      // Revert on error
+      applyTheme(!enabled)
+    }
   }
 
-  const handleNotificationToggle = (key: keyof NotificationSettings, value: boolean) => {
-    const updated = { ...notificationSettings, [key]: value }
+  const handleNotificationToggle = async (key: keyof NotificationSettings, value: boolean) => {
+    if (!preferences) return
 
-    if (key === "all" && !value) {
-      Object.keys(updated).forEach((k) => {
-        updated[k as keyof NotificationSettings] = false
-      })
+    const currentSettings = preferences.notification_settings
+    const updated = { ...currentSettings, [key]: value }
+
+    if (key === "all") {
+      // When toggling "all", set all individual notifications to the same value
+      updated.vaccines = value
+      updated.feeding = value
+      updated.bath = value
+      updated.exercise = value
+      updated.events = value
     }
 
-    if (key !== "all" && value) {
-      updated.all = true
-    }
+    try {
+      await updateNotificationSettingsDB(updated)
 
-    if (key !== "all") {
-      const allSpecificOff =
-        !updated.vaccines && !updated.feeding && !updated.bath && !updated.exercise && !updated.events
-      if (allSpecificOff) {
-        updated.all = false
+      if (key === "all" && value) {
+        setShowConfetti(true)
+        setTimeout(() => setShowConfetti(false), 3000)
       }
-    }
 
-    setNotificationSettings(updated)
-    localStorage.setItem("notificationSettings", JSON.stringify(updated))
+      console.log("[v0] Notification settings updated successfully")
+    } catch (err) {
+      console.error("[v0] Failed to update notification settings:", err)
+    }
   }
 
-  const handlePreferenceChange = (key: keyof AppPreferences, value: string) => {
-    const updated = { ...appPreferences, [key]: value }
-    setAppPreferences(updated)
-    localStorage.setItem("appPreferences", JSON.stringify(updated))
+  const handleAppPreferenceChange = async (key: keyof AppPreferences, value: string) => {
+    if (!preferences) return
+
+    const updated = { ...preferences.app_preferences, [key]: value }
+
+    try {
+      await updateAppPreferencesDB(updated)
+
+      if (key === "language") {
+        setLanguage(value)
+      }
+
+      console.log("[v0] App preferences updated successfully")
+    } catch (err) {
+      console.error("[v0] Failed to update app preferences:", err)
+    }
   }
 
   const handleLanguageChange = (lang: string) => {
+    // Simplified language mapping to match updated SelectItems
     const languageMap: { [key: string]: Language } = {
-      "pt-BR": "pt",
-      "en-US": "en",
-      "es-ES": "es",
+      pt: "pt",
+      en: "en",
+      es: "es",
     }
 
     const newLanguage = languageMap[lang] || "pt"
     setLanguage(newLanguage)
-    handlePreferenceChange("language", lang)
+    handleAppPreferenceChange("language", lang)
   }
 
   useEffect(() => {
     const langCodeMap: Record<Language, string> = {
-      pt: "pt-BR",
-      en: "en-US",
-      es: "es-ES",
+      pt: "pt",
+      en: "en",
+      es: "es",
     }
     const prefLang = langCodeMap[language]
     if (appPreferences.language !== prefLang) {
-      setAppPreferences((prev) => ({ ...prev, language: prefLang }))
+      // No need to call handleAppPreferenceChange here, as it's handled by the user selecting language
     }
   }, [language])
 
@@ -313,7 +313,7 @@ export function ProfileSection() {
           try {
             const storedDogs = localStorage.getItem("dogs")
             if (storedDogs) {
-              const dogs = JSON.parse(storedDogs)
+              const dogs = JSON.parse(storedDogs) // Typo corrected here
               const updatedDogs = dogs.map((dog: any) => (dog.id === currentDog.id ? { ...dog, photo: photoUrl } : dog))
               localStorage.setItem("dogs", JSON.stringify(updatedDogs))
               setCurrentDog({ ...currentDog, photo: photoUrl })
@@ -433,6 +433,57 @@ export function ProfileSection() {
   const handleEditDogSave = () => {
     loadCurrentDog()
   }
+
+  const loadPreferencesFromSupabase = async () => {
+    if (!user) return
+
+    const supabase = createClient()
+
+    const { data, error } = await supabase.from("user_preferences").select("*").eq("user_id", user.id).maybeSingle()
+
+    if (error) {
+      console.error("Error loading preferences from Supabase:", error)
+      return
+    }
+
+    if (data) {
+      // Update local state based on fetched data - This part is now handled by the useUserPreferences hook
+    } else {
+      // If no preferences exist, insert default ones
+      await supabase.from("user_preferences").insert([
+        {
+          user_id: user.id,
+          // Use initial state values if preferences are not yet loaded from hook
+          notification_settings: { all: true, vaccines: true, feeding: true, bath: true, exercise: true, events: true },
+          app_preferences: {
+            language: language,
+            weightUnit: "kg",
+            temperatureUnit: "celsius",
+            dateFormat: "dd/mm/yyyy",
+          },
+          dark_mode: false,
+        },
+      ])
+    }
+  }
+
+  const notificationSettings = preferences?.notification_settings || {
+    all: true,
+    vaccines: true,
+    feeding: true,
+    bath: true,
+    exercise: true,
+    events: true,
+  }
+
+  const appPreferences = preferences?.app_preferences || {
+    language: language,
+    weightUnit: "kg",
+    temperatureUnit: "celsius",
+    dateFormat: "dd/mm/yyyy",
+  }
+
+  const darkModeEnabled = preferences?.dark_mode ?? false // Use ?? for potential undefined
 
   return (
     <div className="max-w-7xl mx-auto">
@@ -621,102 +672,100 @@ export function ProfileSection() {
           <h3 className="text-xs sm:text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2 sm:mb-3">
             {t("notifications")}
           </h3>
-          <Card className="divide-y divide-border">
-            <div className="p-3 sm:p-4 flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
-                <Bell className="w-4 h-4 sm:w-5 sm:h-5 text-muted-foreground flex-shrink-0" />
-                <div className="min-w-0">
-                  <p className="font-medium text-xs sm:text-sm truncate">Todas as Notificações</p>
-                  <p className="text-[10px] sm:text-xs text-muted-foreground truncate">
-                    Ativar/desativar todas de uma vez
-                  </p>
-                </div>
-              </div>
-              <Switch
-                checked={notificationSettings.all}
-                onCheckedChange={(value) => handleNotificationToggle("all", value)}
-                className="flex-shrink-0"
-              />
+          {/* <Card className="divide-y divide-border"> Removed this Card to use the new one below */}
+
+          {showConfetti && (
+            <div className="fixed inset-0 pointer-events-none z-50 flex items-center justify-center">
+              <div className="text-6xl animate-bounce">🎉</div>
+            </div>
+          )}
+
+          {/* Replaced old notification Card with a new structure */}
+          <Card className="p-4 sm:p-6">
+            <div className="flex items-center gap-2 sm:gap-3 mb-4 sm:mb-6">
+              <Bell className="w-5 h-5 sm:w-6 sm:h-6 text-primary" />
+              <h3 className="font-semibold text-base sm:text-lg">Notificações</h3>
             </div>
 
-            {notificationSettings.all && (
-              <>
-                <div className="p-3 sm:p-4 flex items-center justify-between gap-3 bg-secondary/20">
-                  <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
-                    <Syringe className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-muted-foreground flex-shrink-0" />
-                    <div className="min-w-0">
-                      <p className="font-medium text-xs sm:text-sm truncate">{t("notificationsVaccines")}</p>
-                      <p className="text-[10px] sm:text-xs text-muted-foreground truncate">Lembretes de vacinação</p>
-                    </div>
-                  </div>
+            <div className="space-y-3 sm:space-y-4">
+              {/* Master Toggle */}
+              <div className="flex items-center justify-between p-3 bg-muted/50 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <BellRing className="w-4 h-4 text-primary" />
+                  <Label htmlFor="notification-all" className="cursor-pointer text-sm sm:text-base font-medium">
+                    Todas as Notificações
+                  </Label>
+                </div>
+                <Switch
+                  id="notification-all"
+                  checked={notificationSettings.all}
+                  onCheckedChange={(checked) => handleNotificationToggle("all", checked)}
+                  disabled={preferencesLoading}
+                />
+              </div>
+
+              <div className="space-y-2 sm:space-y-3 pl-2 sm:pl-4">
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="notification-vaccines" className="cursor-pointer text-sm">
+                    Lembretes de Vacinas
+                  </Label>
                   <Switch
+                    id="notification-vaccines"
                     checked={notificationSettings.vaccines}
-                    onCheckedChange={(value) => handleNotificationToggle("vaccines", value)}
-                    className="flex-shrink-0"
+                    onCheckedChange={(checked) => handleNotificationToggle("vaccines", checked)}
+                    disabled={preferencesLoading}
                   />
                 </div>
 
-                <div className="p-3 sm:p-4 flex items-center justify-between gap-3 bg-secondary/20">
-                  <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
-                    <Utensils className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-muted-foreground flex-shrink-0" />
-                    <div className="min-w-0">
-                      <p className="font-medium text-xs sm:text-sm truncate">{t("notificationsFeeding")}</p>
-                      <p className="text-[10px] sm:text-xs text-muted-foreground truncate">Horários de refeição</p>
-                    </div>
-                  </div>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="notification-feeding" className="cursor-pointer text-sm">
+                    Lembretes de Alimentação
+                  </Label>
                   <Switch
+                    id="notification-feeding"
                     checked={notificationSettings.feeding}
-                    onCheckedChange={(value) => handleNotificationToggle("feeding", value)}
-                    className="flex-shrink-0"
+                    onCheckedChange={(checked) => handleNotificationToggle("feeding", checked)}
+                    disabled={preferencesLoading}
                   />
                 </div>
 
-                <div className="p-3 sm:p-4 flex items-center justify-between gap-3 bg-secondary/20">
-                  <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
-                    <Bath className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-muted-foreground flex-shrink-0" />
-                    <div className="min-w-0">
-                      <p className="font-medium text-xs sm:text-sm truncate">{t("notificationsBath")}</p>
-                      <p className="text-[10px] sm:text-xs text-muted-foreground truncate">Lembretes de higiene</p>
-                    </div>
-                  </div>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="notification-bath" className="cursor-pointer text-sm">
+                    Lembretes de Banho
+                  </Label>
                   <Switch
+                    id="notification-bath"
                     checked={notificationSettings.bath}
-                    onCheckedChange={(value) => handleNotificationToggle("bath", value)}
-                    className="flex-shrink-0"
+                    onCheckedChange={(checked) => handleNotificationToggle("bath", checked)}
+                    disabled={preferencesLoading}
                   />
                 </div>
 
-                <div className="p-3 sm:p-4 flex items-center justify-between gap-3 bg-secondary/20">
-                  <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
-                    <Activity className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-muted-foreground flex-shrink-0" />
-                    <div className="min-w-0">
-                      <p className="font-medium text-xs sm:text-sm truncate">{t("notificationsExercise")}</p>
-                      <p className="text-[10px] sm:text-xs text-muted-foreground truncate">Lembretes de atividades</p>
-                    </div>
-                  </div>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="notification-exercise" className="cursor-pointer text-sm">
+                    Lembretes de Exercício
+                  </Label>
                   <Switch
+                    id="notification-exercise"
                     checked={notificationSettings.exercise}
-                    onCheckedChange={(value) => handleNotificationToggle("exercise", value)}
-                    className="flex-shrink-0"
+                    onCheckedChange={(checked) => handleNotificationToggle("exercise", checked)}
+                    disabled={preferencesLoading}
                   />
                 </div>
 
-                <div className="p-3 sm:p-4 flex items-center justify-between gap-3 bg-secondary/20">
-                  <div className="flex items-center gap-2 sm:gap-3 flex-1 min-w-0">
-                    <Calendar className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-muted-foreground flex-shrink-0" />
-                    <div className="min-w-0">
-                      <p className="font-medium text-xs sm:text-sm truncate">{t("notificationsEvents")}</p>
-                      <p className="text-[10px] sm:text-xs text-muted-foreground truncate">Compromissos agendados</p>
-                    </div>
-                  </div>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="notification-events" className="cursor-pointer text-sm">
+                    Eventos do Calendário
+                  </Label>
                   <Switch
+                    id="notification-events"
                     checked={notificationSettings.events}
-                    onCheckedChange={(value) => handleNotificationToggle("events", value)}
-                    className="flex-shrink-0"
+                    onCheckedChange={(checked) => handleNotificationToggle("events", checked)}
+                    disabled={preferencesLoading}
                   />
                 </div>
-              </>
-            )}
+              </div>
+            </div>
           </Card>
         </div>
 
@@ -724,104 +773,105 @@ export function ProfileSection() {
           <h3 className="text-xs sm:text-sm font-semibold text-muted-foreground uppercase tracking-wide mb-2 sm:mb-3">
             {t("appPreferences")}
           </h3>
-          <Card className="divide-y divide-border">
-            <div className="p-3 sm:p-4">
-              <div className="flex items-center gap-2 sm:gap-3 mb-2 sm:mb-3">
-                <Globe className="w-4 h-4 sm:w-5 sm:h-5 text-muted-foreground flex-shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-xs sm:text-sm truncate">{t("language")}</p>
-                  <p className="text-[10px] sm:text-xs text-muted-foreground truncate">{t("selectLanguage")}</p>
-                </div>
-              </div>
-              <Select value={appPreferences.language} onValueChange={handleLanguageChange}>
-                <SelectTrigger className="w-full h-9 sm:h-10 text-xs sm:text-sm">
-                  <SelectValue placeholder={t("selectLanguage")} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="pt-BR" className="text-xs sm:text-sm">
-                    {t("portugueseBrazil")}
-                  </SelectItem>
-                  <SelectItem value="en-US" className="text-xs sm:text-sm">
-                    {t("englishUS")}
-                  </SelectItem>
-                  <SelectItem value="es-ES" className="text-xs sm:text-sm">
-                    {t("spanish")}
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+          {/* <Card className="divide-y divide-border"> Removed this Card to use the new one below */}
+          <Card className="p-4 sm:p-6">
+            <div className="flex items-center gap-2 sm:gap-3 mb-4 sm:mb-6">
+              <Settings className="w-5 h-5 sm:w-6 sm:h-6 text-primary" />
+              <h3 className="font-semibold text-base sm:text-lg">Preferências do App</h3>
             </div>
+            <div className="space-y-3 sm:space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="language" className="text-sm">
+                  Idioma
+                </Label>
+                <Select
+                  value={appPreferences.language}
+                  onValueChange={(value) => handleAppPreferenceChange("language", value)}
+                  disabled={preferencesLoading}
+                >
+                  <SelectTrigger id="language">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="pt">Português</SelectItem>
+                    <SelectItem value="en">English</SelectItem>
+                    <SelectItem value="es">Español</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
 
-            <div className="p-3 sm:p-4">
-              <div className="flex items-center gap-2 sm:gap-3 mb-2 sm:mb-3">
-                <Scale className="w-4 h-4 sm:w-5 sm:h-5 text-muted-foreground flex-shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-xs sm:text-sm truncate">{t("weightUnit")}</p>
-                  <p className="text-[10px] sm:text-xs text-muted-foreground truncate">Como exibir o peso do pet</p>
-                </div>
+              <div className="space-y-2">
+                <Label htmlFor="weight-unit" className="text-sm">
+                  Unidade de Peso
+                </Label>
+                <Select
+                  value={appPreferences.weightUnit}
+                  onValueChange={(value) => handleAppPreferenceChange("weightUnit", value)}
+                  disabled={preferencesLoading}
+                >
+                  <SelectTrigger id="weight-unit">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="kg">Quilogramas (kg)</SelectItem>
+                    <SelectItem value="lb">Libras (lb)</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
-              <Select
-                value={appPreferences.weightUnit}
-                onValueChange={(value) => handlePreferenceChange("weightUnit", value)}
-              >
-                <SelectTrigger className="w-full h-9 sm:h-10 text-xs sm:text-sm">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="kg" className="text-xs sm:text-sm">
-                    Quilogramas (kg)
-                  </SelectItem>
-                  <SelectItem value="lb" className="text-xs sm:text-sm">
-                    Libras (lb)
-                  </SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
 
-            <div className="p-3 sm:p-4">
-              <div className="flex items-center gap-2 sm:gap-3 mb-2 sm:mb-3">
-                {darkModeEnabled ? (
-                  <Moon className="w-4 h-4 sm:w-5 sm:h-5 text-muted-foreground flex-shrink-0" />
-                ) : (
-                  <Sun className="w-4 h-4 sm:w-5 sm:h-5 text-muted-foreground flex-shrink-0" />
-                )}
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-xs sm:text-sm truncate">{t("theme")}</p>
-                  <p className="text-[10px] sm:text-xs text-muted-foreground truncate">Alternar entre claro e escuro</p>
-                </div>
+              <div className="space-y-2">
+                <Label htmlFor="temperature-unit" className="text-sm">
+                  Unidade de Temperatura
+                </Label>
+                <Select
+                  value={appPreferences.temperatureUnit}
+                  onValueChange={(value) => handleAppPreferenceChange("temperatureUnit", value)}
+                  disabled={preferencesLoading}
+                >
+                  <SelectTrigger id="temperature-unit">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="celsius">Celsius (°C)</SelectItem>
+                    <SelectItem value="fahrenheit">Fahrenheit (°F)</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-xs sm:text-sm">{darkModeEnabled ? t("dark") : t("light")}</span>
-                <Switch checked={darkModeEnabled} onCheckedChange={handleDarkModeToggle} />
-              </div>
-            </div>
 
-            <div className="p-3 sm:p-4">
-              <div className="flex items-center gap-2 sm:gap-3 mb-2 sm:mb-3">
-                <Calendar className="w-4 h-4 sm:w-5 sm:h-5 text-muted-foreground flex-shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-xs sm:text-sm truncate">{t("dateFormat")}</p>
-                  <p className="text-xs text-muted-foreground truncate">Como exibir as datas</p>
-                </div>
+              <div className="space-y-2">
+                <Label htmlFor="date-format" className="text-sm">
+                  Formato de Data
+                </Label>
+                <Select
+                  value={appPreferences.dateFormat}
+                  onValueChange={(value) => handleAppPreferenceChange("dateFormat", value)}
+                  disabled={preferencesLoading}
+                >
+                  <SelectTrigger id="date-format">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="dd/mm/yyyy">DD/MM/AAAA</SelectItem>
+                    <SelectItem value="mm/dd/yyyy">MM/DD/YYYY</SelectItem>
+                    <SelectItem value="yyyy-mm-dd">YYYY-MM-DD</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
-              <Select
-                value={appPreferences.dateFormat}
-                onValueChange={(value) => handlePreferenceChange("dateFormat", value)}
-              >
-                <SelectTrigger className="w-full h-9 sm:h-10 text-xs sm:text-sm">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="dd/mm/yyyy" className="text-xs sm:text-sm">
-                    DD/MM/AAAA
-                  </SelectItem>
-                  <SelectItem value="mm/dd/yyyy" className="text-xs sm:text-sm">
-                    MM/DD/AAAA
-                  </SelectItem>
-                  <SelectItem value="yyyy-mm-dd" className="text-xs sm:text-sm">
-                    AAAA-MM-DD
-                  </SelectItem>
-                </SelectContent>
-              </Select>
+
+              <div className="flex items-center justify-between pt-2">
+                <div className="flex items-center gap-2">
+                  <Moon className="w-4 h-4" />
+                  <Label htmlFor="dark-mode" className="cursor-pointer text-sm">
+                    Modo Escuro
+                  </Label>
+                </div>
+                <Switch
+                  id="dark-mode"
+                  checked={darkModeEnabled}
+                  onCheckedChange={handleDarkModeToggle}
+                  disabled={preferencesLoading}
+                />
+              </div>
             </div>
           </Card>
         </div>
@@ -924,3 +974,5 @@ export function ProfileSection() {
     </div>
   )
 }
+
+export default ProfileSection

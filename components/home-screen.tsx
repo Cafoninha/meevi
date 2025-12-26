@@ -5,75 +5,59 @@ import type React from "react"
 import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
-import {
-  Home,
-  BookOpen,
-  Heart,
-  Calendar,
-  User,
-  Plus,
-  Utensils,
-  Bath,
-  Activity,
-  Trash2,
-  BarChart3,
-  Droplet,
-} from "lucide-react"
-import { cn } from "@/lib/utils"
-import { DiarySection } from "@/components/diary-section"
-import { EssentialsSection } from "@/components/essentials-section"
-import { CalendarSection } from "@/components/calendar-section"
-import { ProfileSection } from "@/components/profile-section"
-import { StatisticsSection } from "@/components/statistics-section"
-import { FeedingSection } from "@/components/feeding-section"
-import { BathSection } from "@/components/bath-section"
-import { ExerciseSection } from "@/components/exercise-section"
-import { HealthSection } from "@/components/health-section"
+import { Calendar, Heart, Activity, Droplets, Scale, Plus, Trash2, Bell } from "lucide-react"
 import { AddDogDialog } from "@/components/add-dog-dialog"
-import { SettingsDialog } from "@/components/settings-dialog"
+import { useDogs, useDiaryEntries } from "@/lib/hooks/use-supabase-data"
+import type { Dog } from "@/lib/hooks/use-supabase-data"
 import { useLanguage } from "@/lib/i18n"
 import Link from "next/link"
 import Image from "next/image"
-import { useDogs, useDiaryEntries } from "@/lib/hooks/use-supabase-data"
 import { useAuth } from "@/lib/auth-context"
+import DiarySection from "@/components/diary-section"
+import EssentialsSection from "@/components/essentials-section"
+import CalendarSection from "@/components/calendar-section"
+import StatisticsSection from "@/components/statistics-section"
+import ProfileSection from "@/components/profile-section"
+import SettingsDialog from "@/components/settings-dialog"
+import FeedingSection from "@/components/feeding-section"
+import BathSection from "@/components/bath-section"
+import ExerciseSection from "@/components/exercise-section"
+import HealthSection from "@/components/health-section"
+import { toast } from "react-toastify"
+import { NotificationsCenter } from "@/components/notifications-center"
+import { useNotifications } from "@/lib/hooks/use-supabase-data"
+import { OfflineIndicator } from "@/components/offline-indicator"
 
 type Tab = "home" | "diary" | "essentials" | "calendar" | "statistics" | "profile"
-
-interface Dog {
-  id: string
-  name: string
-  birth_date: string
-  breed: string
-  owner_id: string
-  photo?: string
-}
 
 interface Owner {
   id: string
   name: string
   age?: number | null
   gender?: string | null
-  email?: string | null
-  phone?: string | null
-  location?: string | null
-  photo?: string | null
 }
 
-export function HomeScreen() {
+function HomeScreen() {
   const [activeTab, setActiveTab] = useState<Tab>("home")
   const [activeQuickAction, setActiveQuickAction] = useState<string | null>(null)
+  const [isAddingDog, setIsAddingDog] = useState(false)
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+  const [isNotificationsOpen, setIsNotificationsOpen] = useState(false)
   const { dogs, loading: dogsLoading, addDog, updateDog, deleteDog } = useDogs()
   const { entries: diaryEntries } = useDiaryEntries()
   const { user } = useAuth()
   const [selectedDogIndex, setSelectedDogIndex] = useState(0)
-  const [showAddDogDialog, setShowAddDogDialog] = useState(false)
-  const [showSettingsDialog, setShowSettingsDialog] = useState(false)
+  const [dogToDelete, setDogToDelete] = useState<string | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const [todayStats, setTodayStats] = useState({
     lastMeal: null as string | null,
     lastWalk: null as string | null,
     waterChanged: null as string | null,
   })
   const { t } = useLanguage()
+  const { unreadCount } = useNotifications()
 
   useEffect(() => {
     if (!diaryEntries || diaryEntries.length === 0) return
@@ -100,6 +84,21 @@ export function HomeScreen() {
     })
   }, [diaryEntries])
 
+  useEffect(() => {
+    const checkNotifications = async () => {
+      try {
+        await fetch("/api/check-notifications", { method: "POST" })
+      } catch (error) {
+        console.error("[v0] Error checking notifications:", error)
+      }
+    }
+
+    checkNotifications()
+    const interval = setInterval(checkNotifications, 15 * 60 * 1000) // Every 15 minutes
+
+    return () => clearInterval(interval)
+  }, [])
+
   const formatBirthDate = (birthDate: string | undefined) => {
     if (!birthDate) return "N/A"
     const [year, month, day] = birthDate.split("-")
@@ -125,37 +124,117 @@ export function HomeScreen() {
     return months === 1 ? "1 mês" : `${months} meses`
   }
 
-  const handleAddDog = async (dogData: { name: string; birthDate: string }) => {
+  const handleAddDog = async (dogData: {
+    name: string
+    birthDate: string
+    breed: string
+    gender: string
+    weight: string
+  }) => {
     try {
       await addDog({
         name: dogData.name,
         birthDate: dogData.birthDate,
-        breed: "Spitz Alemão",
-        gender: "Macho",
-        weight: "5",
+        breed: dogData.breed,
+        gender: dogData.gender,
+        weight: dogData.weight,
         photo: "/placeholder.svg?height=200&width=200",
       })
-      setShowAddDogDialog(false)
+      setIsAddingDog(false)
+      setActiveTab("profile")
     } catch (error) {
       console.error("[v0] Error adding dog:", error)
-      alert("Erro ao adicionar cachorro. Tente novamente.")
+      toast.error("Erro ao adicionar cachorro. Tente novamente.")
     }
   }
 
   const handleDeleteDog = async (dogId: string) => {
+    console.log("[v0] handleDeleteDog called with id:", dogId)
+    console.log("[v0] Current dogs count:", dogs.length)
+
     if (dogs.length === 1) {
-      alert("Você precisa ter pelo menos um cachorro cadastrado!")
+      toast.error("Você precisa ter pelo menos um cachorro cadastrado!")
       return
     }
 
+    setIsDeleting(true)
     try {
+      console.log("[v0] Calling deleteDog...")
       await deleteDog(dogId)
+      console.log("[v0] deleteDog completed successfully")
+
       if (dogs[selectedDogIndex]?.id === dogId) {
         setSelectedDogIndex(0)
       }
+
+      setDogToDelete(null)
+      console.log("[v0] Dog deletion process completed")
     } catch (error) {
       console.error("[v0] Error deleting dog:", error)
-      alert("Erro ao deletar cachorro. Tente novamente.")
+      toast.error("Erro ao deletar cachorro. Tente novamente.")
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
+  const confirmDeleteDog = (dogId: string) => {
+    setDogToDelete(dogId)
+  }
+
+  const handlePhotoUpload = async (file: File, dogId: string) => {
+    console.log("[v0] Starting photo upload for dog:", dogId)
+    setIsUploadingPhoto(true)
+
+    try {
+      const formData = new FormData()
+      formData.append("file", file)
+      formData.append("dogId", dogId)
+
+      const response = await fetch("/api/upload-dog-photo", {
+        method: "POST",
+        body: formData,
+      })
+
+      if (!response.ok) {
+        throw new Error("Upload failed")
+      }
+
+      const data = await response.json()
+      console.log("[v0] Photo uploaded successfully:", data.url)
+
+      // Update dog with new photo URL
+      await updateDog(dogId, { photo: data.url })
+      console.log("[v0] Dog updated with new photo")
+
+      toast.success("Foto atualizada com sucesso!")
+    } catch (error) {
+      console.error("[v0] Error uploading photo:", error)
+      toast.error("Erro ao fazer upload da foto. Tente novamente.")
+    } finally {
+      setIsUploadingPhoto(false)
+    }
+  }
+
+  const handlePhotoClick = () => {
+    fileInputRef.current?.click()
+  }
+
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]
+    if (file && currentDog) {
+      // Validate file type
+      if (!file.type.startsWith("image/")) {
+        toast.error("Por favor, selecione uma imagem válida")
+        return
+      }
+
+      // Validate file size (max 5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        toast.error("A imagem deve ter no máximo 5MB")
+        return
+      }
+
+      handlePhotoUpload(file, currentDog.id)
     }
   }
 
@@ -173,7 +252,10 @@ export function HomeScreen() {
   const currentDog = dogs[selectedDogIndex]
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="flex flex-col h-screen bg-background">
+      {/* Offline Indicator */}
+      <OfflineIndicator />
+
       {/* Header */}
       <header className="bg-card border-b border-border px-3 sm:px-4 md:px-6 py-3 sm:py-4">
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-3">
@@ -183,33 +265,57 @@ export function HomeScreen() {
               {user?.name ? `${t("welcome").split(" ")[0]}, ${user.name}` : t("welcome")}
             </p>
           </div>
-          <Button
-            size="icon"
-            variant="ghost"
-            className="w-9 h-9 sm:w-10 sm:h-10 rounded-full flex-shrink-0"
-            onClick={() => setShowSettingsDialog(true)}
-          >
-            <div className="w-9 h-9 sm:w-10 sm:h-10 bg-primary/10 rounded-full flex items-center justify-center">
-              <User className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
-            </div>
-          </Button>
+
+          <div className="flex items-center gap-2">
+            <Button
+              size="icon"
+              variant="ghost"
+              className="w-9 h-9 sm:w-10 sm:h-10 rounded-full flex-shrink-0 relative"
+              onClick={() => setIsNotificationsOpen(true)}
+            >
+              <Bell className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
+              {unreadCount > 0 && (
+                <span className="absolute top-1 right-1 w-4 h-4 bg-destructive text-destructive-foreground text-[10px] rounded-full flex items-center justify-center font-bold transition-all duration-300 animate-in fade-in zoom-in">
+                  {unreadCount > 9 ? "9+" : unreadCount}
+                </span>
+              )}
+            </Button>
+
+            <Button
+              size="icon"
+              variant="ghost"
+              className="w-9 h-9 sm:w-10 sm:h-10 rounded-full flex-shrink-0"
+              onClick={() => setIsSettingsOpen(true)}
+            >
+              <div className="w-9 h-9 sm:w-10 sm:h-10 bg-primary/10 rounded-full flex items-center justify-center">
+                <Heart className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
+              </div>
+            </Button>
+          </div>
         </div>
       </header>
 
       {/* Main Content */}
-      <main className="flex-1 overflow-auto pb-20">
+      <main className="flex-1 overflow-auto pb-16">
         {activeTab === "home" && (
           <HomeTab
             onQuickAction={setActiveQuickAction}
             dogs={dogs}
             selectedDogIndex={selectedDogIndex}
-            onAddDog={() => setShowAddDogDialog(true)}
+            onAddDog={() => setIsAddingDog(true)}
             onDeleteDog={handleDeleteDog}
             calculateAge={calculateAge}
             formatBirthDate={formatBirthDate}
-            onUpdateDog={updateDog}
+            onUpdateDog={(updatedDogs) => {
+              // Will be handled by Supabase subscription
+            }}
             onNavigateToStats={() => setActiveTab("statistics")}
             todayStats={todayStats}
+            onSelectDog={setSelectedDogIndex}
+            onNavigateToProfile={() => setActiveTab("profile")}
+            onPhotoClick={handlePhotoClick}
+            isUploadingPhoto={isUploadingPhoto}
+            updateDog={updateDog}
           />
         )}
         {activeTab === "diary" && <DiarySection />}
@@ -224,13 +330,13 @@ export function HomeScreen() {
         <div className="max-w-7xl mx-auto px-2 sm:px-4 py-1.5 sm:py-2">
           <div className="flex items-center justify-around">
             <NavButton
-              icon={Home}
+              icon={Scale}
               label={t("home")}
               active={activeTab === "home"}
               onClick={() => setActiveTab("home")}
             />
             <NavButton
-              icon={BookOpen}
+              icon={Calendar}
               label={t("diary")}
               active={activeTab === "diary"}
               onClick={() => setActiveTab("diary")}
@@ -243,19 +349,19 @@ export function HomeScreen() {
               isLogo={true}
             />
             <NavButton
-              icon={Calendar}
+              icon={Activity}
               label={t("calendar")}
               active={activeTab === "calendar"}
               onClick={() => setActiveTab("calendar")}
             />
             <NavButton
-              icon={BarChart3}
+              icon={Droplets}
               label={t("statistics")}
               active={activeTab === "statistics"}
               onClick={() => setActiveTab("statistics")}
             />
             <NavButton
-              icon={User}
+              icon={Heart}
               label={t("profile")}
               active={activeTab === "profile"}
               onClick={() => setActiveTab("profile")}
@@ -264,27 +370,21 @@ export function HomeScreen() {
         </div>
       </nav>
 
-      <FeedingSection
-        open={activeQuickAction === "feeding"}
-        onOpenChange={(open) => !open && setActiveQuickAction(null)}
-      />
-      <BathSection open={activeQuickAction === "bath"} onOpenChange={(open) => !open && setActiveQuickAction(null)} />
-      <ExerciseSection
-        open={activeQuickAction === "exercise"}
-        onOpenChange={(open) => !open && setActiveQuickAction(null)}
-      />
-      <HealthSection
-        open={activeQuickAction === "health"}
-        onOpenChange={(open) => !open && setActiveQuickAction(null)}
-      />
-
-      <AddDogDialog open={showAddDogDialog} onOpenChange={setShowAddDogDialog} onAddDog={handleAddDog} />
-      <SettingsDialog
-        open={showSettingsDialog}
-        onOpenChange={setShowSettingsDialog}
-        owner={user}
-        onOwnerUpdate={updateDog}
-      />
+      <AddDogDialog open={isAddingDog} onOpenChange={setIsAddingDog} onAddDog={handleAddDog} />
+      <SettingsDialog open={isSettingsOpen} onOpenChange={setIsSettingsOpen} />
+      <NotificationsCenter open={isNotificationsOpen} onOpenChange={setIsNotificationsOpen} />
+      {activeQuickAction === "feeding" && (
+        <FeedingSection open={true} onOpenChange={(open) => !open && setActiveQuickAction(null)} />
+      )}
+      {activeQuickAction === "bath" && (
+        <BathSection open={true} onOpenChange={(open) => !open && setActiveQuickAction(null)} />
+      )}
+      {activeQuickAction === "exercise" && (
+        <ExerciseSection open={true} onOpenChange={(open) => !open && setActiveQuickAction(null)} />
+      )}
+      {activeQuickAction === "health" && (
+        <HealthSection open={true} onOpenChange={(open) => !open && setActiveQuickAction(null)} />
+      )}
     </div>
   )
 }
@@ -301,10 +401,7 @@ function NavButton({ icon: Icon, label, active, onClick, isLogo = false }: NavBu
   return (
     <button
       onClick={onClick}
-      className={cn(
-        "flex flex-col items-center gap-0.5 sm:gap-1 py-1.5 sm:py-2 px-2 sm:px-3 rounded-lg transition-colors",
-        active ? "text-primary" : "text-muted-foreground",
-      )}
+      className={`flex flex-col items-center gap-0.5 sm:gap-1 py-1.5 sm:py-2 px-2 sm:px-3 rounded-lg transition-colors ${active ? "text-primary" : "text-muted-foreground"}`}
     >
       {isLogo ? (
         <div className="w-4 h-4 sm:w-5 sm:h-5 relative">
@@ -326,9 +423,14 @@ interface HomeTabProps {
   onDeleteDog: (dogId: string) => void
   calculateAge: (birthDate: string | undefined) => string
   formatBirthDate: (birthDate: string | undefined) => string
-  onUpdateDog: () => void
+  onUpdateDog: (updatedDogs: Dog[]) => void
   onNavigateToStats: () => void
   todayStats: any
+  onSelectDog: (index: number) => void
+  onNavigateToProfile: () => void
+  onPhotoClick: () => void
+  isUploadingPhoto: boolean
+  updateDog: (dogId: string, updates: Partial<Dog>) => Promise<void>
 }
 
 function HomeTab({
@@ -342,48 +444,83 @@ function HomeTab({
   onUpdateDog,
   onNavigateToStats,
   todayStats,
+  onSelectDog,
+  onNavigateToProfile,
+  onPhotoClick,
+  isUploadingPhoto,
+  updateDog,
 }: HomeTabProps) {
   const { t } = useLanguage()
-  const dogPhotoInputRef = useRef<HTMLInputElement>(null)
+  const [uploadingDogId, setUploadingDogId] = useState<string | null>(null)
+  const dogFileInputRefs = useRef<{ [key: string]: HTMLInputElement | null }>({})
 
-  const handleDogPhotoClick = () => {
-    dogPhotoInputRef.current?.click()
+  const handleDogPhotoClick = (dogId: string, event: React.MouseEvent) => {
+    event.stopPropagation()
+    console.log("[v0] Photo button clicked for dog:", dogId)
+    console.log("[v0] File input ref exists:", !!dogFileInputRefs.current[dogId])
+    dogFileInputRefs.current[dogId]?.click()
   }
 
-  const handleDogPhotoChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+  const handleDogPhotoChange = async (dogId: string, event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0]
-    if (!file) return
 
-    const reader = new FileReader()
-    reader.onloadend = () => {
-      const base64String = reader.result as string
-      const currentDog = dogs[selectedDogIndex]
-
-      const updatedDogs = dogs.map((dog) => (dog.id === currentDog.id ? { ...dog, photo: base64String } : dog))
-
-      onUpdateDog(updatedDogs)
+    if (!file) {
+      return
     }
-    reader.readAsDataURL(file)
-  }
 
-  const handleDogCardPhotoClick = (dogId: string) => {
-    const input = document.getElementById(`dog-photo-${dogId}`) as HTMLInputElement
-    input?.click()
-  }
-
-  const handleDogCardPhotoChange = (event: React.ChangeEvent<HTMLInputElement>, dogId: string) => {
-    const file = event.target.files?.[0]
-    if (!file) return
-
-    const reader = new FileReader()
-    reader.onloadend = () => {
-      const base64String = reader.result as string
-
-      const updatedDogs = dogs.map((dog) => (dog.id === dogId ? { ...dog, photo: base64String } : dog))
-
-      onUpdateDog(updatedDogs)
+    if (!file.type.startsWith("image/")) {
+      toast.error("Por favor, selecione uma imagem válida")
+      return
     }
-    reader.readAsDataURL(file)
+
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("A imagem deve ter no máximo 5MB")
+      return
+    }
+
+    console.log("[v0] Starting photo upload for dog:", dogId, "File size:", file.size, "bytes")
+    setUploadingDogId(dogId)
+
+    try {
+      const formData = new FormData()
+      formData.append("file", file)
+      formData.append("dogId", dogId)
+
+      const response = await fetch("/api/upload-dog-photo", {
+        method: "POST",
+        body: formData,
+      })
+
+      let data
+      const contentType = response.headers.get("content-type")
+
+      if (contentType && contentType.includes("application/json")) {
+        data = await response.json()
+      } else {
+        // If response is not JSON, read as text for debugging
+        const text = await response.text()
+        console.error("[v0] Non-JSON response:", text)
+        throw new Error("Resposta inválida do servidor")
+      }
+
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || data.details || "Upload failed")
+      }
+
+      console.log("[v0] Photo uploaded successfully, updating dog...")
+
+      await updateDog(dogId, { photo: data.url })
+      console.log("[v0] Photo updated successfully in UI")
+      toast.success("Foto atualizada com sucesso!")
+    } catch (error) {
+      console.error("[v0] Error uploading photo:", error)
+      const errorMessage = error instanceof Error ? error.message : "Erro desconhecido"
+      toast.error(`Erro ao fazer upload da foto: ${errorMessage}`)
+    } finally {
+      setUploadingDogId(null)
+      // Clear the input so the same file can be selected again
+      event.target.value = ""
+    }
   }
 
   if (dogs.length === 0) {
@@ -409,7 +546,7 @@ function HomeTab({
         <div className="flex items-center gap-3 sm:gap-4">
           <div
             className="w-14 h-14 sm:w-16 sm:h-16 bg-card rounded-full overflow-hidden cursor-pointer hover:opacity-80 transition-opacity relative group flex-shrink-0"
-            onClick={handleDogPhotoClick}
+            onClick={onPhotoClick}
           >
             <img
               src={currentDog.photo || "/cute-spitz-dog.jpg"}
@@ -417,26 +554,23 @@ function HomeTab({
               className="w-full h-full object-cover"
             />
             <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-              <Plus className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
+              {isUploadingPhoto ? (
+                <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <Plus className="w-5 h-5 sm:w-6 sm:h-6 text-white" />
+              )}
             </div>
           </div>
-          <input
-            ref={dogPhotoInputRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={handleDogPhotoChange}
-          />
           <div className="flex-1 min-w-0">
             <h2 className="text-lg sm:text-xl font-bold truncate">{currentDog.name}</h2>
             <p className="text-xs sm:text-sm text-muted-foreground truncate">
-              {currentDog.breed} • {calculateAge(currentDog.birth_date)}
+              {currentDog.breed} • {calculateAge(currentDog.birthDate)}
             </p>
           </div>
           <Button
             size="icon"
             variant="ghost"
-            className="rounded-full w-8 h-8 sm:w-10 sm:h-10 flex-shrink-0"
+            className="rounded-full w-8 h-8 sm:w-9 sm:h-9 flex-shrink-0"
             onClick={onAddDog}
           >
             <Plus className="w-4 h-4 sm:w-5 sm:h-5" />
@@ -451,7 +585,7 @@ function HomeTab({
       >
         <div className="flex items-center gap-2 sm:gap-3">
           <div className="w-10 h-10 sm:w-12 sm:h-12 bg-green-500/20 rounded-lg flex items-center justify-center flex-shrink-0">
-            <BarChart3 className="w-5 h-5 sm:w-6 sm:h-6 text-green-600" />
+            <Droplets className="w-5 h-5 sm:w-6 sm:h-6 text-green-600" />
           </div>
           <div className="flex-1 min-w-0">
             <h3 className="font-semibold text-sm sm:text-base">{t("statistics")}</h3>
@@ -466,7 +600,7 @@ function HomeTab({
         <Card className="p-3 sm:p-4 bg-gradient-to-r from-primary/10 to-accent/10 border-primary/20 hover:shadow-md transition-shadow cursor-pointer">
           <div className="flex items-center gap-2 sm:gap-3">
             <div className="w-10 h-10 sm:w-12 sm:h-12 bg-primary/20 rounded-lg flex items-center justify-center flex-shrink-0">
-              <Droplet className="w-5 h-5 sm:w-6 sm:h-6 text-primary" />
+              <Scale className="w-5 h-5 sm:w-6 sm:h-6 text-primary" />
             </div>
             <div className="flex-1 min-w-0">
               <h3 className="font-semibold text-sm sm:text-base">{t("wiki")}</h3>
@@ -484,7 +618,7 @@ function HomeTab({
         >
           <div className="flex flex-col sm:flex-row items-center sm:items-start gap-2 sm:gap-3">
             <div className="w-9 h-9 sm:w-10 sm:h-10 bg-primary/10 rounded-lg flex items-center justify-center flex-shrink-0">
-              <Utensils className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
+              <Scale className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
             </div>
             <span className="font-medium text-xs sm:text-sm text-center sm:text-left">{t("feeding")}</span>
           </div>
@@ -495,7 +629,7 @@ function HomeTab({
         >
           <div className="flex flex-col sm:flex-row items-center sm:items-start gap-2 sm:gap-3">
             <div className="w-9 h-9 sm:w-10 sm:h-10 bg-primary/10 rounded-lg flex items-center justify-center flex-shrink-0">
-              <Bath className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
+              <Droplets className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
             </div>
             <span className="font-medium text-xs sm:text-sm text-center sm:text-left">{t("bath")}</span>
           </div>
@@ -530,7 +664,7 @@ function HomeTab({
         <div className="space-y-2 sm:space-y-3">
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 sm:w-10 sm:h-10 bg-primary/10 rounded-lg flex items-center justify-center flex-shrink-0">
-              <Utensils className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
+              <Scale className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-xs sm:text-sm font-medium">{t("lastMeal")}</p>
@@ -548,7 +682,7 @@ function HomeTab({
           </div>
           <div className="flex items-center gap-3">
             <div className="w-8 h-8 sm:w-10 sm:h-10 bg-primary/10 rounded-lg flex items-center justify-center flex-shrink-0">
-              <Droplet className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
+              <Droplets className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-xs sm:text-sm font-medium">{t("waterChanged")}</p>
@@ -564,47 +698,69 @@ function HomeTab({
           {t("yourDogs")}
         </h3>
         <div className="space-y-2 sm:space-y-3">
-          {dogs.map((dog) => (
-            <Card key={dog.id} className="p-3 sm:p-4 hover:shadow-md transition-shadow">
-              <div className="flex items-center gap-3 sm:gap-4">
-                <div
-                  className="w-12 h-12 sm:w-14 sm:h-14 bg-primary/10 rounded-full overflow-hidden flex-shrink-0 cursor-pointer hover:opacity-80 transition-opacity relative group"
-                  onClick={() => handleDogCardPhotoClick(dog.id)}
-                >
-                  <img src={dog.photo || "/cute-spitz-dog.jpg"} alt={dog.name} className="w-full h-full object-cover" />
-                  <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                    <Plus className="w-4 h-4 text-white" />
+          {[...dogs]
+            .sort((a, b) => {
+              const dateA = new Date(a.birthDate || 0).getTime()
+              const dateB = new Date(b.birthDate || 0).getTime()
+              return dateB - dateA // Newest (youngest) first
+            })
+            .map((dog) => {
+              const originalIndex = dogs.findIndex((d) => d.id === dog.id)
+              return (
+                <Card key={dog.id} className="p-3 sm:p-4 hover:shadow-md transition-all">
+                  <input
+                    ref={(el) => (dogFileInputRefs.current[dog.id] = el)}
+                    type="file"
+                    accept="image/*"
+                    className="hidden"
+                    onChange={(e) => handleDogPhotoChange(dog.id, e)}
+                  />
+                  <div className="flex items-center gap-3 sm:gap-4">
+                    <div
+                      className="w-12 h-12 sm:w-14 sm:h-14 bg-primary/10 rounded-full overflow-hidden flex-shrink-0 hover:opacity-80 transition-opacity relative group cursor-pointer"
+                      onClick={(e) => handleDogPhotoClick(dog.id, e)}
+                    >
+                      <img
+                        src={dog.photo || "/cute-spitz-dog.jpg"}
+                        alt={dog.name}
+                        className="w-full h-full object-cover"
+                      />
+                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                        {uploadingDogId === dog.id ? (
+                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        ) : (
+                          <Plus className="w-4 h-4 text-white" />
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <h4 className="font-semibold text-sm sm:text-base truncate">{dog.name}</h4>
+                      <p className="text-xs sm:text-sm text-muted-foreground truncate">
+                        {dog.breed} • {calculateAge(dog.birthDate)}
+                      </p>
+                      <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 sm:mt-1 truncate">
+                        Nascimento: {formatBirthDate(dog.birthDate)}
+                      </p>
+                    </div>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="rounded-full text-muted-foreground hover:text-destructive hover:bg-destructive/10 flex-shrink-0 w-8 h-8 sm:w-9 sm:h-9"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onDeleteDog(dog.id)
+                      }}
+                    >
+                      <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                    </Button>
                   </div>
-                </div>
-                <input
-                  id={`dog-photo-${dog.id}`}
-                  type="file"
-                  accept="image/*"
-                  className="hidden"
-                  onChange={(e) => handleDogCardPhotoChange(e, dog.id)}
-                />
-                <div className="flex-1 min-w-0">
-                  <h4 className="font-semibold text-sm sm:text-base truncate">{dog.name}</h4>
-                  <p className="text-xs sm:text-sm text-muted-foreground truncate">
-                    {dog.breed} • {calculateAge(dog.birth_date)}
-                  </p>
-                  <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 sm:mt-1 truncate">
-                    Nascimento: {formatBirthDate(dog.birth_date)}
-                  </p>
-                </div>
-                <Button
-                  size="icon"
-                  variant="ghost"
-                  className="rounded-full text-muted-foreground hover:text-destructive hover:bg-destructive/10 flex-shrink-0 w-8 h-8 sm:w-9 sm:h-9"
-                  onClick={() => onDeleteDog(dog.id)}
-                >
-                  <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-                </Button>
-              </div>
-            </Card>
-          ))}
+                </Card>
+              )
+            })}
         </div>
       </div>
     </div>
   )
 }
+
+export { HomeScreen }

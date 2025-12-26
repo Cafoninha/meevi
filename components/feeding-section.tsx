@@ -6,98 +6,49 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card } from "@/components/ui/card"
-import { Clock, Save } from "lucide-react"
+import { Clock, Trash2, Check, Sparkles, Trophy } from "lucide-react"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useToast } from "@/hooks/use-toast"
+import { useDogs, useFeeding, useDiaryEntries } from "@/lib/hooks/use-supabase-data"
+import { format } from "date-fns"
+import confetti from "canvas-confetti"
 
 interface FeedingSectionProps {
   open: boolean
   onOpenChange: (open: boolean) => void
 }
 
-interface Dog {
-  id: string
-  name: string
-}
-
-interface FeedingHistoryEntry {
-  time: string
-  brand: string
-  date: string
-  dogName?: string
-  fullDate?: string
-}
-
 export function FeedingSection({ open, onOpenChange }: FeedingSectionProps) {
   const [foodBrand, setFoodBrand] = useState("Premier Pet")
-  const [lastFeedingTime, setLastFeedingTime] = useState("14:30")
-  const [feedingHistory, setFeedingHistory] = useState<FeedingHistoryEntry[]>([])
-  const [dogs, setDogs] = useState<Dog[]>([])
   const [selectedDogId, setSelectedDogId] = useState<string>("all")
+  const [portionSize, setPortionSize] = useState("")
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [showSuccess, setShowSuccess] = useState(false)
+  const [newRecordId, setNewRecordId] = useState<string | null>(null)
   const { toast } = useToast()
 
-  useEffect(() => {
-    if (open) {
-      loadDogs()
-    }
-  }, [open])
+  const { dogs, loading: dogsLoading } = useDogs()
+  const { records, loading: recordsLoading, addRecord, deleteRecord } = useFeeding()
+  const { addEntry: addDiaryEntry } = useDiaryEntries()
 
   useEffect(() => {
-    const saved = localStorage.getItem("meevi_feeding_history")
-    if (saved) {
-      setFeedingHistory(JSON.parse(saved))
-    } else {
-      setFeedingHistory([
-        { time: "14:30", brand: "Premier Pet", date: "Hoje" },
-        { time: "08:00", brand: "Premier Pet", date: "Hoje" },
-        { time: "19:30", brand: "Premier Pet", date: "Ontem" },
-      ])
+    if (dogs.length > 0 && !selectedDogId) {
+      setSelectedDogId("all")
     }
-
-    const savedDogSelection = localStorage.getItem("meevi_feeding_selected_dog")
-    if (savedDogSelection) {
-      setSelectedDogId(savedDogSelection)
-    }
-  }, [])
+  }, [dogs])
 
   useEffect(() => {
-    if (selectedDogId) {
-      localStorage.setItem("meevi_feeding_selected_dog", selectedDogId)
-    }
-  }, [selectedDogId])
-
-  const loadDogs = () => {
-    try {
-      const storedDogs = localStorage.getItem("dogs")
-      if (storedDogs) {
-        const parsedDogs = JSON.parse(storedDogs)
-        setDogs(Array.isArray(parsedDogs) ? parsedDogs : [])
-      } else {
-        // Try legacy format
-        const legacyDog = localStorage.getItem("dogData")
-        if (legacyDog) {
-          const dogData = JSON.parse(legacyDog)
-          const migratedDogs = [{ id: dogData.id || Date.now().toString(), name: dogData.name }]
-          setDogs(migratedDogs)
-          localStorage.setItem("dogs", JSON.stringify(migratedDogs))
-        }
-      }
-    } catch (error) {
-      console.error("Error loading dogs:", error)
-      setDogs([])
-    }
-  }
-
-  const handleSave = () => {
-    if (dogs.length === 0) {
-      toast({
-        title: "Nenhum cachorro cadastrado",
-        description: "Por favor, cadastre um cachorro primeiro.",
-        variant: "destructive",
+    if (newRecordId && records.some((r) => r.id === newRecordId)) {
+      confetti({
+        particleCount: 50,
+        spread: 60,
+        origin: { y: 0.6 },
       })
-      return
+      setNewRecordId(null)
     }
+  }, [records, newRecordId])
 
+  const handleAddFeeding = async () => {
     if (!selectedDogId || selectedDogId === "") {
       toast({
         title: "Selecione um cachorro",
@@ -107,81 +58,147 @@ export function FeedingSection({ open, onOpenChange }: FeedingSectionProps) {
       return
     }
 
-    const now = new Date()
-    const timeString = `${now.getHours().toString().padStart(2, "0")}:${now.getMinutes().toString().padStart(2, "0")}`
-    const dateString = now.toISOString().split("T")[0]
-
-    const selectedDog = selectedDogId === "all" ? null : dogs.find((d) => d.id === selectedDogId)
-    const dogNameForHistory = selectedDogId === "all" ? "Todos os cachorros" : selectedDog?.name
-
-    const newEntry: FeedingHistoryEntry = {
-      time: timeString,
-      brand: foodBrand,
-      date: "Hoje",
-      fullDate: dateString,
-      dogName: dogNameForHistory,
+    if (!foodBrand.trim()) {
+      toast({
+        title: "Marca da ração obrigatória",
+        description: "Por favor, informe a marca da ração.",
+        variant: "destructive",
+      })
+      return
     }
-    const updatedHistory = [newEntry, ...feedingHistory.slice(0, 9)]
 
-    setLastFeedingTime(timeString)
-    setFeedingHistory(updatedHistory)
-    localStorage.setItem("meevi_feeding_history", JSON.stringify(updatedHistory))
+    setIsSubmitting(true)
+    setShowSuccess(false)
 
-    // Add to global diary
-    const diaryEntries = JSON.parse(localStorage.getItem("meevi_diary_entries") || "[]")
+    try {
+      const now = new Date()
+      const dogsToFeed = selectedDogId === "all" ? dogs : dogs.filter((d) => d.id === selectedDogId)
 
-    if (selectedDogId === "all") {
-      // Register for all dogs
-      dogs.forEach((dog) => {
-        diaryEntries.unshift({
-          id: `${Date.now()}-${dog.id}`,
-          type: "food",
-          title: `Alimentação - ${foodBrand}`,
-          description: `Marca: ${foodBrand}`,
-          time: timeString,
-          date: dateString,
+      console.log("[v0] Adding feeding record for dogs:", dogsToFeed.map((d) => d.name).join(", "))
+
+      for (const dog of dogsToFeed) {
+        const newRecord = await addRecord({
+          dog_id: dog.id,
+          food_brand: foodBrand,
+          meal_time: now.toISOString(),
+          portion_size: portionSize || undefined,
+          notes: undefined,
+        })
+
+        if (newRecord && dogsToFeed.length === 1) {
+          setNewRecordId(newRecord.id)
+        }
+
+        await addDiaryEntry({
           dogId: dog.id,
           dogName: dog.name,
+          type: "food",
+          title: `Alimentação - ${foodBrand}`,
+          notes: portionSize ? `Porção: ${portionSize}g` : "",
+          date: format(now, "yyyy-MM-dd"),
+          time: format(now, "HH:mm"),
         })
-      })
+      }
+
+      setShowSuccess(true)
+      setTimeout(() => setShowSuccess(false), 2000)
+
+      const dogNames = dogsToFeed.map((d) => d.name).join(", ")
       toast({
-        title: "Alimentação registrada!",
-        description: `Alimentação de todos os cachorros registrada com sucesso.`,
+        title: "🎉 Alimentação registrada!",
+        description: `${dogNames} ${dogsToFeed.length > 1 ? "foram alimentados" : "foi alimentado"} com ${foodBrand} às ${format(now, "HH:mm")}`,
       })
-    } else {
-      // Register for selected dog
-      diaryEntries.unshift({
-        id: Date.now().toString(),
-        type: "food",
-        title: `Alimentação - ${foodBrand}`,
-        description: `Marca: ${foodBrand}`,
-        time: timeString,
-        date: dateString,
-        dogId: selectedDogId,
-        dogName: selectedDog?.name,
-      })
+
+      setPortionSize("")
+
+      console.log("[v0] Feeding record(s) added successfully!")
+    } catch (error) {
+      console.error("[v0] Error adding feeding:", error)
       toast({
-        title: "Alimentação registrada!",
-        description: `Alimentação de ${selectedDog?.name} registrada com sucesso.`,
+        title: "Erro ao registrar",
+        description: "Não foi possível registrar a alimentação. Tente novamente.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const handleDeleteRecord = async (id: string) => {
+    try {
+      await deleteRecord(id)
+      toast({
+        title: "Registro excluído",
+        description: "Registro de alimentação excluído com sucesso.",
+      })
+    } catch (error) {
+      toast({
+        title: "Erro ao excluir",
+        description: "Não foi possível excluir o registro.",
+        variant: "destructive",
       })
     }
-
-    localStorage.setItem("meevi_diary_entries", JSON.stringify(diaryEntries))
   }
+
+  const groupedRecords = records.reduce(
+    (acc, record) => {
+      const dog = dogs.find((d) => d.id === record.dog_id)
+      if (!dog) return acc
+
+      if (!acc[dog.name]) {
+        acc[dog.name] = []
+      }
+      acc[dog.name].push(record)
+      return acc
+    },
+    {} as Record<string, typeof records>,
+  )
+
+  const getTimeAgo = (mealTime: string) => {
+    const now = new Date()
+    const meal = new Date(mealTime)
+    const diffMs = now.getTime() - meal.getTime()
+    const diffHours = Math.floor(diffMs / (1000 * 60 * 60))
+    const diffDays = Math.floor(diffHours / 24)
+
+    if (diffDays > 0) {
+      return `${diffDays} dia${diffDays > 1 ? "s" : ""} atrás`
+    } else if (diffHours > 0) {
+      return `${diffHours} hora${diffHours > 1 ? "s" : ""} atrás`
+    } else {
+      const diffMins = Math.floor(diffMs / (1000 * 60))
+      return `${diffMins} minuto${diffMins > 1 ? "s" : ""} atrás`
+    }
+  }
+
+  const todayFeedings = records.filter((r) => {
+    const recordDate = format(new Date(r.meal_time), "yyyy-MM-dd")
+    const today = format(new Date(), "yyyy-MM-dd")
+    return recordDate === today
+  }).length
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle className="text-xl">Alimentação</DialogTitle>
+          <DialogTitle className="text-xl flex items-center gap-2">
+            Alimentação
+            {todayFeedings >= 2 && (
+              <span className="flex items-center gap-1 text-sm font-normal text-primary">
+                <Trophy className="w-4 h-4" />
+                {todayFeedings} refeições hoje!
+              </span>
+            )}
+          </DialogTitle>
         </DialogHeader>
 
         <div className="space-y-6 py-4">
+          {/* Dog Selection */}
           <div className="space-y-2">
             <Label htmlFor="dog-select">Selecionar Cachorro</Label>
-            <Select value={selectedDogId} onValueChange={setSelectedDogId}>
+            <Select value={selectedDogId} onValueChange={setSelectedDogId} disabled={dogsLoading}>
               <SelectTrigger id="dog-select">
-                <SelectValue placeholder="Escolha o cachorro" />
+                <SelectValue placeholder={dogsLoading ? "Carregando..." : "Escolha o cachorro"} />
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Todos os cachorros</SelectItem>
@@ -192,75 +209,135 @@ export function FeedingSection({ open, onOpenChange }: FeedingSectionProps) {
                 ))}
               </SelectContent>
             </Select>
-            <p className="text-xs text-muted-foreground">Selecione qual cachorro está sendo alimentado</p>
+            <p className="text-xs text-muted-foreground">
+              {selectedDogId === "all"
+                ? "Registrar alimentação para todos os cachorros"
+                : "Selecione qual cachorro está sendo alimentado"}
+            </p>
           </div>
 
-          {/* Current Food Brand */}
+          {/* Food Brand */}
           <div className="space-y-2">
-            <Label htmlFor="food-brand">Marca da Ração</Label>
+            <Label htmlFor="food-brand">Marca da Ração *</Label>
             <Input
               id="food-brand"
               placeholder="Ex: Premier Pet, Royal Canin..."
               value={foodBrand}
               onChange={(e) => setFoodBrand(e.target.value)}
             />
-            <p className="text-xs text-muted-foreground">
-              Mantenha registro da ração que você está oferecendo ao seu Spitz
-            </p>
+            <p className="text-xs text-muted-foreground">Informe a marca da ração que está oferecendo</p>
           </div>
 
-          {/* Last Feeding Time */}
+          {/* Portion Size (Optional) */}
           <div className="space-y-2">
-            <Label htmlFor="feeding-time">Último Horário de Alimentação</Label>
-            <div className="flex gap-2">
-              <Input
-                id="feeding-time"
-                type="time"
-                value={lastFeedingTime}
-                onChange={(e) => setLastFeedingTime(e.target.value)}
-                className="flex-1"
-              />
-              <Button onClick={handleSave} size="icon">
-                <Save className="w-4 h-4" />
-              </Button>
-            </div>
-            <p className="text-xs text-muted-foreground">Registre o horário que você alimentou seu cachorro</p>
+            <Label htmlFor="portion-size">Porção em gramas (Opcional)</Label>
+            <Input
+              id="portion-size"
+              type="number"
+              placeholder="Ex: 80, 120..."
+              value={portionSize}
+              onChange={(e) => setPortionSize(e.target.value)}
+            />
+            <p className="text-xs text-muted-foreground">Quantidade de ração em gramas</p>
           </div>
 
-          {/* Quick Time Buttons */}
-          <div className="space-y-2">
-            <Label>Alimentar Agora</Label>
-            <Button onClick={handleSave} className="w-full" variant="default">
-              <Clock className="w-4 h-4 mr-2" />
-              Registrar Alimentação Agora
-            </Button>
-          </div>
+          {/* Register Button */}
+          <Button
+            onClick={handleAddFeeding}
+            className="w-full relative overflow-hidden"
+            variant={showSuccess ? "default" : "default"}
+            disabled={isSubmitting || !selectedDogId}
+          >
+            {showSuccess ? (
+              <>
+                <Check className="w-4 h-4 mr-2" />
+                Registrado!
+                <Sparkles className="w-4 h-4 ml-2 animate-pulse" />
+              </>
+            ) : (
+              <>
+                <Clock className="w-4 h-4 mr-2" />
+                {isSubmitting ? "Registrando..." : "Registrar Alimentação Agora"}
+              </>
+            )}
+          </Button>
 
           {/* Feeding History */}
           <div className="space-y-2">
-            <Label>Histórico de Alimentação</Label>
-            <div className="space-y-2">
-              {feedingHistory.map((feed, index) => (
-                <Card key={index} className="p-3">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium text-sm">{feed.brand}</p>
-                      {feed.dogName && <p className="text-xs font-medium text-primary">{feed.dogName}</p>}
-                      <p className="text-xs text-muted-foreground">{feed.date}</p>
+            <Label className="flex items-center justify-between">
+              <span>Histórico de Alimentação</span>
+              {records.length > 0 && (
+                <span className="text-xs text-muted-foreground font-normal">
+                  {records.length} registro{records.length > 1 ? "s" : ""}
+                </span>
+              )}
+            </Label>
+            {recordsLoading ? (
+              <Card className="p-4 text-center text-sm text-muted-foreground">Carregando histórico...</Card>
+            ) : Object.keys(groupedRecords).length === 0 ? (
+              <Card className="p-4 text-center text-sm text-muted-foreground">
+                Nenhum registro de alimentação ainda
+              </Card>
+            ) : (
+              <div className="space-y-3">
+                {Object.entries(groupedRecords).map(([dogName, dogRecords]) => (
+                  <div key={dogName} className="space-y-2">
+                    <div className="flex items-center gap-2 px-1">
+                      <div className="w-2 h-2 rounded-full bg-primary animate-pulse" />
+                      <p className="text-sm font-semibold text-primary">{dogName}</p>
                     </div>
-                    <span className="text-sm font-semibold text-primary">{feed.time}</span>
+                    {dogRecords
+                      .sort((a, b) => new Date(b.meal_time).getTime() - new Date(a.meal_time).getTime())
+                      .slice(0, 5)
+                      .map((record, index) => (
+                        <Card
+                          key={record.id}
+                          className={`p-3 hover:bg-accent/50 transition-all duration-300 ${
+                            record.id === newRecordId ? "animate-in slide-in-from-top-2 bg-primary/10" : ""
+                          }`}
+                          style={{ animationDelay: `${index * 50}ms` }}
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="flex-1 space-y-1">
+                              <div className="flex items-center gap-2">
+                                <Clock className="w-3.5 h-3.5 text-primary" />
+                                <span className="text-sm font-bold text-foreground">
+                                  {format(new Date(record.meal_time), "HH:mm")}
+                                </span>
+                                <span className="text-xs text-muted-foreground">•</span>
+                                <span className="text-xs text-muted-foreground">{getTimeAgo(record.meal_time)}</span>
+                              </div>
+                              <p className="text-sm font-semibold text-foreground pl-5">{record.food_brand}</p>
+                              {record.portion_size && (
+                                <p className="text-xs text-muted-foreground pl-5">Porção: {record.portion_size}g</p>
+                              )}
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 text-muted-foreground hover:text-destructive flex-shrink-0"
+                              onClick={() => handleDeleteRecord(record.id)}
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </Button>
+                          </div>
+                        </Card>
+                      ))}
                   </div>
-                </Card>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {/* Tips */}
           <Card className="p-4 bg-primary/5 border-primary/20">
-            <h4 className="font-semibold text-sm mb-2">Dicas de Alimentação</h4>
+            <h4 className="font-semibold text-sm mb-2 flex items-center gap-2">
+              <Sparkles className="w-4 h-4 text-primary" />
+              Dicas de Alimentação
+            </h4>
             <ul className="space-y-1 text-xs text-muted-foreground">
-              <li>• Spitz Alemão deve comer 2-3 vezes ao dia</li>
-              <li>• Porção recomendada: 80-120g por dia (adulto)</li>
+              <li>• Cachorros devem comer 2-3 vezes ao dia</li>
+              <li>• Porção recomendada varia conforme peso e idade</li>
               <li>• Sempre deixe água fresca disponível</li>
               <li>• Evite trocar a ração bruscamente</li>
             </ul>
@@ -270,3 +347,5 @@ export function FeedingSection({ open, onOpenChange }: FeedingSectionProps) {
     </Dialog>
   )
 }
+
+export default FeedingSection

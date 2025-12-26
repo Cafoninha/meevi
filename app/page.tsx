@@ -5,6 +5,7 @@ import { HomeScreen } from "@/components/home-screen"
 import { AuthDialog } from "@/components/auth-dialog"
 import { useDogs } from "@/lib/hooks/use-supabase-data"
 import { useEffect, useState } from "react"
+import { PWAInstallPrompt } from "@/components/pwa-install-prompt"
 
 export default function Page() {
   const { user, loading: authLoading, isAuthenticated } = useAuth()
@@ -38,5 +39,10 @@ export default function Page() {
     return <OnboardingFlow onComplete={() => setShowOnboarding(false)} />
   }
 
-  return <HomeScreen />
+  return (
+    <>
+      <HomeScreen />
+      <PWAInstallPrompt />
+    </>
+  )
 }

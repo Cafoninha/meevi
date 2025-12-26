@@ -15,6 +15,26 @@ interface AuthDialogProps {
   onOpenChange: (open: boolean) => void
 }
 
+function translateAuthError(errorMessage: string): string {
+  const errorMap: Record<string, string> = {
+    "Invalid login credentials": "Email ou senha incorretos. Verifique e tente novamente.",
+    "Email not confirmed": "Por favor, confirme seu email antes de fazer login.",
+    "User already registered": "Este email já está cadastrado. Faça login ou recupere sua senha.",
+    "Password should be at least 6 characters": "A senha deve ter pelo menos 6 caracteres.",
+    "Unable to validate email address: invalid format": "Formato de email inválido.",
+    "Signup requires a valid password": "Por favor, insira uma senha válida.",
+    "Email rate limit exceeded": "Muitas tentativas. Aguarde alguns minutos e tente novamente.",
+  }
+
+  for (const [key, value] of Object.entries(errorMap)) {
+    if (errorMessage.includes(key)) {
+      return value
+    }
+  }
+
+  return errorMessage
+}
+
 export function AuthDialog({ open, onOpenChange }: AuthDialogProps) {
   const [isLogin, setIsLogin] = useState(true)
   const [email, setEmail] = useState("")
@@ -33,22 +53,25 @@ export function AuthDialog({ open, onOpenChange }: AuthDialogProps) {
       if (isLogin) {
         const { error } = await signIn(email, password)
         if (error) {
-          setError(error.message)
+          setError(translateAuthError(error.message))
         } else {
           onOpenChange(false)
+          setEmail("")
+          setPassword("")
         }
       } else {
         const { error } = await signUp(email, password, name)
         if (error) {
-          setError(error.message)
+          setError(translateAuthError(error.message))
         } else {
           alert("Conta criada com sucesso! Você já pode fazer login.")
           setIsLogin(true)
           setPassword("")
+          setName("")
         }
       }
     } catch (err) {
-      setError("Erro ao processar solicitação")
+      setError("Erro ao processar solicitação. Tente novamente.")
     } finally {
       setLoading(false)
     }
@@ -88,6 +111,7 @@ export function AuthDialog({ open, onOpenChange }: AuthDialogProps) {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
+              autoComplete={isLogin ? "email" : "off"}
             />
           </div>
 
@@ -101,10 +125,12 @@ export function AuthDialog({ open, onOpenChange }: AuthDialogProps) {
               onChange={(e) => setPassword(e.target.value)}
               required
               minLength={6}
+              autoComplete={isLogin ? "current-password" : "new-password"}
             />
+            {!isLogin && <p className="text-xs text-muted-foreground">Mínimo de 6 caracteres</p>}
           </div>
 
-          {error && <div className="p-3 text-sm text-red-600 bg-red-50 rounded-md">{error}</div>}
+          {error && <div className="p-3 text-sm text-red-600 bg-red-50 rounded-md border border-red-200">{error}</div>}
 
           <Button type="submit" className="w-full" disabled={loading}>
             {loading ? (

@@ -33,7 +33,7 @@ interface Dog {
   breed: string
 }
 
-export function CalendarSection() {
+export default function CalendarSection() {
   const [events, setEvents] = useState<CalendarEvent[]>([])
   const [dogs, setDogs] = useState<Dog[]>([])
   const [selectedDogId, setSelectedDogId] = useState<string>("all")

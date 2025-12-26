@@ -146,7 +146,11 @@ export function SettingsDialog({ open, onOpenChange, owner, onOwnerUpdate }: Set
               <h3 className="font-semibold">Suporte</h3>
             </div>
             <p className="text-sm text-muted-foreground mb-2">Precisa de ajuda? Entre em contato conosco:</p>
-            <a href="mailto:dmndkennel@gmail.com" className="text-sm font-medium text-primary hover:underline">
+            <a
+              href="mailto:dmndkennel@gmail.com?subject=Suporte%20Meevi%20App"
+              className="text-sm font-medium text-primary hover:underline inline-flex items-center gap-1"
+            >
+              <Mail className="w-3.5 h-3.5" />
               dmndkennel@gmail.com
             </a>
           </Card>
@@ -161,3 +165,5 @@ export function SettingsDialog({ open, onOpenChange, owner, onOwnerUpdate }: Set
     </Dialog>
   )
 }
+
+export default SettingsDialog
