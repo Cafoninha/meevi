@@ -1221,6 +1221,7 @@ export function useUserPreferences() {
       if (error) throw error
 
       setPreferences((prev) => (prev ? { ...prev, dark_mode: darkMode } : null))
+      await loadPreferences() // Reload to ensure sync
     } catch (err) {
       console.error("[v0] Error updating dark mode:", err)
       throw err
@@ -1268,5 +1269,127 @@ export function useUserPreferences() {
     updateAppPreferences,
     updateDarkMode,
     refreshPreferences: loadPreferences,
+  }
+}
+
+export function useOwnerProfile() {
+  const { user } = useAuth()
+  const [profile, setProfile] = useState<{
+    id: string
+    name: string
+    email: string
+    phone: string
+    location: string
+    photo_url: string | null
+    age: number | null
+    gender: string | null
+  } | null>(null)
+  const [loading, setLoading] = useState(true)
+  const supabase = createClient()
+
+  const loadProfile = async () => {
+    if (!user) {
+      setLoading(false)
+      return
+    }
+
+    try {
+      const { data, error } = await supabase.from("owners").select("*").eq("id", user.id).maybeSingle()
+
+      if (error) throw error
+
+      if (data) {
+        setProfile(data)
+      } else {
+        // Create default profile if none exists
+        const defaultProfile = {
+          id: user.id,
+          name: user.email?.split("@")[0] || "Usuário",
+          email: user.email || "",
+          phone: "",
+          location: "",
+          photo_url: null,
+          age: null,
+          gender: null,
+        }
+
+        const { data: newData, error: insertError } = await supabase
+          .from("owners")
+          .insert(defaultProfile)
+          .select()
+          .single()
+
+        if (insertError) throw insertError
+
+        setProfile(newData)
+      }
+    } catch (err) {
+      console.error("[v0] Error loading owner profile:", err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const updateProfile = async (
+    updates: Partial<{
+      name: string
+      email: string
+      phone: string
+      location: string
+      photo_url: string | null
+      age: number | null
+      gender: string | null
+    }>,
+  ) => {
+    if (!user) return
+
+    try {
+      const { error } = await supabase.from("owners").update(updates).eq("id", user.id)
+
+      if (error) throw error
+
+      setProfile((prev) => (prev ? { ...prev, ...updates } : null))
+      await loadProfile() // Reload to ensure sync
+    } catch (err) {
+      console.error("[v0] Error updating owner profile:", err)
+      throw err
+    }
+  }
+
+  useEffect(() => {
+    loadProfile()
+
+    // Set up real-time subscription
+    if (user) {
+      const channel = supabase
+        .channel("owner_profile_changes")
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "owners",
+            filter: `id=eq.${user.id}`,
+          },
+          (payload) => {
+            console.log("[v0] Owner profile updated in real-time:", payload)
+            if (payload.eventType === "UPDATE" || payload.eventType === "INSERT") {
+              setProfile(payload.new as any)
+            }
+          },
+        )
+        .subscribe()
+
+      return () => {
+        supabase.removeChannel(channel)
+      }
+    }
+  }, [user])
+
+  return {
+    profile,
+    loading,
+    updateProfile,
+    refreshProfile: loadProfile,
   }
 }

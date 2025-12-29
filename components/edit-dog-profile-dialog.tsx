@@ -7,78 +7,75 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { useDogs } from "@/lib/hooks/use-supabase-data"
+import { toast } from "react-toastify"
+import confetti from "canvas-confetti"
 
 interface EditDogProfileDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   dogId?: string
-  onSave?: () => void
 }
 
-export function EditDogProfileDialog({ open, onOpenChange, dogId, onSave }: EditDogProfileDialogProps) {
+export function EditDogProfileDialog({ open, onOpenChange, dogId }: EditDogProfileDialogProps) {
   const [name, setName] = useState("")
   const [breed, setBreed] = useState("")
   const [birthDate, setBirthDate] = useState("")
   const [gender, setGender] = useState("male")
   const [weight, setWeight] = useState("")
-  const [currentDog, setCurrentDog] = useState<any>(null)
+  const [isLoading, setIsLoading] = useState(false)
+  const { dogs, updateDog } = useDogs()
 
   useEffect(() => {
-    if (open) {
-      loadDogData()
-    }
-  }, [open, dogId])
-
-  const loadDogData = () => {
-    try {
-      const storedDogs = localStorage.getItem("dogs")
-      if (storedDogs) {
-        const dogs = JSON.parse(storedDogs)
-        // Use dogId if provided, otherwise use first dog
-        const dog = dogId ? dogs.find((d: any) => d.id === dogId) : dogs[0]
-
-        if (dog) {
-          setCurrentDog(dog)
-          setName(dog.name || "")
-          setBreed(dog.breed || "")
-          setBirthDate(dog.birthDate || "")
-          setGender(dog.gender || "male")
-          setWeight(dog.weight || "")
-        }
+    if (open && dogId) {
+      const dog = dogs.find((d) => d.id === dogId)
+      if (dog) {
+        console.log("[v0] Loading dog data for editing:", dog.name)
+        setName(dog.name || "")
+        setBreed(dog.breed || "")
+        setBirthDate(dog.birthDate || "")
+        setGender(dog.gender || "male")
+        setWeight(dog.weight || "")
       }
-    } catch (error) {
-      console.error("Error loading dog data:", error)
     }
-  }
+  }, [open, dogId, dogs])
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
-    if (!currentDog) {
-      alert("Erro ao carregar dados do cachorro")
+    if (!dogId) {
+      toast.error("Erro ao identificar o cachorro")
       return
     }
 
+    console.log("[v0] Saving dog profile:", { dogId, name, breed, birthDate, gender, weight })
+    setIsLoading(true)
+
     try {
-      const storedDogs = localStorage.getItem("dogs")
-      if (storedDogs) {
-        const dogs = JSON.parse(storedDogs)
-        const updatedDogs = dogs.map((dog: any) =>
-          dog.id === currentDog.id ? { ...dog, name, breed, birthDate, gender, weight } : dog,
-        )
+      await updateDog(dogId, {
+        name,
+        breed,
+        birthDate,
+        gender,
+        weight,
+      })
 
-        localStorage.setItem("dogs", JSON.stringify(updatedDogs))
+      console.log("[v0] Dog profile saved successfully")
 
-        // Call onSave callback to refresh parent component
-        if (onSave) {
-          onSave()
-        }
+      confetti({
+        particleCount: 100,
+        spread: 70,
+        origin: { y: 0.6 },
+        colors: ["#3b82f6", "#60a5fa", "#93c5fd"],
+      })
 
-        onOpenChange(false)
-      }
+      toast.success(`Perfil de ${name} atualizado com sucesso!`)
+      onOpenChange(false)
     } catch (error) {
-      console.error("Error saving dog data:", error)
-      alert("Erro ao salvar dados. Tente novamente.")
+      console.error("[v0] Error saving dog profile:", error)
+      toast.error("Erro ao salvar perfil. Tente novamente.")
+    } finally {
+      setIsLoading(false)
     }
   }
 
@@ -86,7 +83,7 @@ export function EditDogProfileDialog({ open, onOpenChange, dogId, onSave }: Edit
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Editar Pet</DialogTitle>
+          <DialogTitle>Editar Perfil do Pet</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div className="space-y-2">
@@ -97,6 +94,7 @@ export function EditDogProfileDialog({ open, onOpenChange, dogId, onSave }: Edit
               onChange={(e) => setName(e.target.value)}
               placeholder="Nome do seu pet"
               required
+              disabled={isLoading}
             />
           </div>
 
@@ -108,6 +106,7 @@ export function EditDogProfileDialog({ open, onOpenChange, dogId, onSave }: Edit
               onChange={(e) => setBreed(e.target.value)}
               placeholder="Raça do seu pet"
               required
+              disabled={isLoading}
             />
           </div>
 
@@ -120,6 +119,7 @@ export function EditDogProfileDialog({ open, onOpenChange, dogId, onSave }: Edit
                 value={birthDate}
                 onChange={(e) => setBirthDate(e.target.value)}
                 required
+                disabled={isLoading}
               />
             </div>
 
@@ -132,13 +132,14 @@ export function EditDogProfileDialog({ open, onOpenChange, dogId, onSave }: Edit
                 value={weight}
                 onChange={(e) => setWeight(e.target.value)}
                 placeholder="6.0"
+                disabled={isLoading}
               />
             </div>
           </div>
 
           <div className="space-y-2">
             <Label htmlFor="gender">Sexo</Label>
-            <Select value={gender} onValueChange={setGender}>
+            <Select value={gender} onValueChange={setGender} disabled={isLoading}>
               <SelectTrigger id="gender">
                 <SelectValue />
               </SelectTrigger>
@@ -150,11 +151,17 @@ export function EditDogProfileDialog({ open, onOpenChange, dogId, onSave }: Edit
           </div>
 
           <div className="flex gap-3 pt-4">
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} className="flex-1">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => onOpenChange(false)}
+              className="flex-1"
+              disabled={isLoading}
+            >
               Cancelar
             </Button>
-            <Button type="submit" className="flex-1">
-              Salvar
+            <Button type="submit" className="flex-1" disabled={isLoading}>
+              {isLoading ? "Salvando..." : "Salvar"}
             </Button>
           </div>
         </form>
@@ -162,3 +169,5 @@ export function EditDogProfileDialog({ open, onOpenChange, dogId, onSave }: Edit
     </Dialog>
   )
 }
+
+export default EditDogProfileDialog

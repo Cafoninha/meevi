@@ -6,70 +6,84 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { useOwnerProfile } from "@/lib/hooks/use-supabase-data"
+import { useAuth } from "@/lib/auth-context" // Import useAuth to get user.id
+import { useToast } from "@/hooks/use-toast"
+import confetti from "canvas-confetti"
 
 interface EditProfileDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  ownerId: string | null
-  onProfileUpdate: () => void
 }
 
-export function EditProfileDialog({ open, onOpenChange, ownerId, onProfileUpdate }: EditProfileDialogProps) {
+export function EditProfileDialog({ open, onOpenChange }: EditProfileDialogProps) {
   const [name, setName] = useState("")
   const [email, setEmail] = useState("")
   const [phone, setPhone] = useState("")
   const [location, setLocation] = useState("")
   const [isLoading, setIsLoading] = useState(false)
 
+  const { profile, updateProfile } = useOwnerProfile()
+  const { user } = useAuth()
+  const { toast } = useToast()
+
   useEffect(() => {
-    if (open && ownerId) {
-      loadOwnerData()
+    if (open && profile) {
+      console.log("[v0] Loading profile data into form:", profile)
+      setName(profile.name || "")
+      setEmail(profile.email || "")
+      setPhone(profile.phone || "")
+      setLocation(profile.location || "")
     }
-  }, [open, ownerId])
+  }, [open, profile])
 
-  const loadOwnerData = () => {
-    if (!ownerId) return
-
-    try {
-      const ownerData = localStorage.getItem("owner")
-      if (ownerData) {
-        const data = JSON.parse(ownerData)
-        setName(data.name || "")
-        setEmail(data.email || "")
-        setPhone(data.phone || "")
-        setLocation(data.location || "")
-      }
-    } catch (error) {
-      console.error("Error loading owner data:", error)
-    }
-  }
-
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
-    if (!ownerId) return
+    console.log("[v0] Save button clicked - submitting profile update")
+
+    if (!user?.id) {
+      console.error("[v0] No user ID found in auth context")
+      toast({
+        title: "Erro",
+        description: "Usuário não autenticado. Faça login novamente.",
+        variant: "destructive",
+      })
+      return
+    }
 
     setIsLoading(true)
+    console.log("[v0] Updating profile with data:", { userId: user.id, name, email, phone, location })
 
     try {
-      const ownerData = localStorage.getItem("owner")
-      const currentOwner = ownerData ? JSON.parse(ownerData) : {}
-
-      const updatedOwner = {
-        ...currentOwner,
+      await updateProfile({
         name,
         email,
         phone,
         location,
-      }
+      })
 
-      localStorage.setItem("owner", JSON.stringify(updatedOwner))
+      console.log("[v0] Profile updated successfully")
 
-      alert("Perfil atualizado com sucesso!")
-      onProfileUpdate()
+      confetti({
+        particleCount: 100,
+        spread: 70,
+        origin: { y: 0.6 },
+        colors: ["#3b82f6", "#06b6d4", "#10b981"],
+      })
+
+      toast({
+        title: "Perfil atualizado!",
+        description: "Suas informações foram salvas com sucesso.",
+      })
+
       onOpenChange(false)
     } catch (error) {
-      console.error("Error saving profile:", error)
-      alert("Erro ao salvar perfil. Tente novamente.")
+      console.error("[v0] Error saving profile:", error)
+      toast({
+        title: "Erro ao salvar",
+        description: "Não foi possível atualizar seu perfil. Tente novamente.",
+        variant: "destructive",
+      })
     } finally {
       setIsLoading(false)
     }
@@ -123,7 +137,7 @@ export function EditProfileDialog({ open, onOpenChange, ownerId, onProfileUpdate
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)} className="flex-1">
               Cancelar
             </Button>
-            <Button type="submit" className="flex-1" disabled={isLoading}>
+            <Button type="submit" className="flex-1 cursor-pointer" disabled={isLoading}>
               {isLoading ? "Salvando..." : "Salvar"}
             </Button>
           </div>

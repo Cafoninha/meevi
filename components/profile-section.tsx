@@ -36,6 +36,7 @@ import { SyncService } from "@/lib/sync-service"
 import { useAuth } from "@/lib/auth-context"
 import { createClient } from "@/lib/supabase/client"
 import { useUserPreferences } from "@/lib/hooks/use-supabase-data" // Added hook
+import { useOwnerProfile } from "@/lib/hooks/use-supabase-data" // Added hook
 import { Label } from "@/components/ui/label" // Added Label component
 
 interface NotificationSettings {
@@ -66,6 +67,8 @@ function ProfileSection() {
     updateDarkMode: updateDarkModeDB,
   } = useUserPreferences()
 
+  const { profile, updateProfile } = useOwnerProfile() // Added hook
+
   const [isEditProfileOpen, setIsEditProfileOpen] = useState(false)
   const [isEditDogOpen, setIsEditDogOpen] = useState(false)
   const [isAboutOpen, setIsAboutOpen] = useState(false)
@@ -90,7 +93,13 @@ function ProfileSection() {
   const syncService = new SyncService()
 
   useEffect(() => {
-    loadOwnerData()
+    if (profile) {
+      setOwnerData(profile)
+      if (profile.photo_url) {
+        setOwnerPhoto(profile.photo_url)
+      }
+      setOwnerId(profile.id)
+    }
     loadLastSyncTime()
     loadCurrentDog()
     if (isAuthenticated && user) {
@@ -99,7 +108,7 @@ function ProfileSection() {
     if (preferences?.dark_mode !== undefined) {
       applyTheme(preferences.dark_mode)
     }
-  }, [isAuthenticated, preferences?.dark_mode]) // Added dependency for preferences?.dark_mode
+  }, [isAuthenticated, preferences?.dark_mode, profile]) // Added dependency for preferences?.dark_mode
 
   useEffect(() => {
     if (isAuthenticated && user) {
@@ -258,43 +267,22 @@ function ProfileSection() {
   }, [language])
 
   const loadOwnerData = () => {
-    const storedOwnerId = localStorage.getItem("ownerId")
-    if (!storedOwnerId) return
-
-    setOwnerId(storedOwnerId)
-
-    try {
-      const ownerDataStr = localStorage.getItem("owner")
-      if (ownerDataStr) {
-        const data = JSON.parse(ownerDataStr)
-        setOwnerData(data)
-        if (data.photo) {
-          setOwnerPhoto(data.photo)
-        }
-      }
-    } catch (error) {
-      console.error("Error loading owner data:", error)
-    }
+    // This function is now redundant due to useOwnerProfile hook
   }
 
-  const handleOwnerPhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleOwnerPhotoChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (file) {
       const reader = new FileReader()
-      reader.onloadend = () => {
+      reader.onloadend = async () => {
         const photoUrl = reader.result as string
         setOwnerPhoto(photoUrl)
 
         if (ownerId) {
           try {
-            const ownerDataStr = localStorage.getItem("owner")
-            if (ownerDataStr) {
-              const data = JSON.parse(ownerDataStr)
-              data.photo = photoUrl
-              localStorage.setItem("owner", JSON.stringify(data))
-            }
+            await updateProfile({ photo_url: photoUrl })
           } catch (error) {
-            console.error("Error saving photo:", error)
+            console.error("[v0] Error saving photo:", error)
           }
         }
       }

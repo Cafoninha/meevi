@@ -27,6 +27,7 @@ import { toast } from "react-toastify"
 import { NotificationsCenter } from "@/components/notifications-center"
 import { useNotifications } from "@/lib/hooks/use-supabase-data"
 import { OfflineIndicator } from "@/components/offline-indicator"
+import EditDogProfileDialog from "@/components/edit-dog-profile-dialog"
 
 type Tab = "home" | "diary" | "essentials" | "calendar" | "statistics" | "profile"
 
@@ -43,6 +44,7 @@ function HomeScreen() {
   const [isAddingDog, setIsAddingDog] = useState(false)
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
   const [isNotificationsOpen, setIsNotificationsOpen] = useState(false)
+  const [editingDogId, setEditingDogId] = useState<string | null>(null)
   const { dogs, loading: dogsLoading, addDog, updateDog, deleteDog } = useDogs()
   const { entries: diaryEntries } = useDiaryEntries()
   const { user } = useAuth()
@@ -58,6 +60,12 @@ function HomeScreen() {
   })
   const { t } = useLanguage()
   const { unreadCount } = useNotifications()
+  const [filteredDogs, setFilteredDogs] = useState<Dog[]>(dogs)
+  const [currentDogIndex, setCurrentDogIndex] = useState(0)
+
+  useEffect(() => {
+    setFilteredDogs(dogs)
+  }, [dogs])
 
   useEffect(() => {
     if (!diaryEntries || diaryEntries.length === 0) return
@@ -316,6 +324,10 @@ function HomeScreen() {
             onPhotoClick={handlePhotoClick}
             isUploadingPhoto={isUploadingPhoto}
             updateDog={updateDog}
+            onEditDog={(dogId) => setEditingDogId(dogId)}
+            filteredDogs={filteredDogs}
+            currentDogIndex={currentDogIndex}
+            setCurrentDogIndex={setCurrentDogIndex}
           />
         )}
         {activeTab === "diary" && <DiarySection />}
@@ -385,6 +397,13 @@ function HomeScreen() {
       {activeQuickAction === "health" && (
         <HealthSection open={true} onOpenChange={(open) => !open && setActiveQuickAction(null)} />
       )}
+      <EditDogProfileDialog
+        open={!!editingDogId}
+        onOpenChange={(open) => {
+          if (!open) setEditingDogId(null)
+        }}
+        dogId={editingDogId || undefined}
+      />
     </div>
   )
 }
@@ -431,6 +450,10 @@ interface HomeTabProps {
   onPhotoClick: () => void
   isUploadingPhoto: boolean
   updateDog: (dogId: string, updates: Partial<Dog>) => Promise<void>
+  onEditDog: (dogId: string) => void
+  filteredDogs: Dog[]
+  currentDogIndex: number
+  setCurrentDogIndex: (index: number) => void
 }
 
 function HomeTab({
@@ -449,6 +472,10 @@ function HomeTab({
   onPhotoClick,
   isUploadingPhoto,
   updateDog,
+  onEditDog,
+  filteredDogs,
+  currentDogIndex,
+  setCurrentDogIndex,
 }: HomeTabProps) {
   const { t } = useLanguage()
   const [uploadingDogId, setUploadingDogId] = useState<string | null>(null)
@@ -705,9 +732,14 @@ function HomeTab({
               return dateB - dateA // Newest (youngest) first
             })
             .map((dog) => {
-              const originalIndex = dogs.findIndex((d) => d.id === dog.id)
               return (
-                <Card key={dog.id} className="p-3 sm:p-4 hover:shadow-md transition-all">
+                <Card
+                  key={dog.id}
+                  className="p-3 sm:p-4 hover:shadow-md transition-all cursor-pointer"
+                  onClick={() => {
+                    onEditDog(dog.id)
+                  }}
+                >
                   <input
                     ref={(el) => (dogFileInputRefs.current[dog.id] = el)}
                     type="file"
@@ -717,7 +749,7 @@ function HomeTab({
                   />
                   <div className="flex items-center gap-3 sm:gap-4">
                     <div
-                      className="w-12 h-12 sm:w-14 sm:h-14 bg-primary/10 rounded-full overflow-hidden flex-shrink-0 hover:opacity-80 transition-opacity relative group cursor-pointer"
+                      className="w-12 h-12 sm:w-14 sm:h-14 bg-card rounded-full overflow-hidden flex-shrink-0 hover:opacity-80 transition-opacity relative group cursor-pointer"
                       onClick={(e) => handleDogPhotoClick(dog.id, e)}
                     >
                       <img
@@ -725,33 +757,30 @@ function HomeTab({
                         alt={dog.name}
                         className="w-full h-full object-cover"
                       />
-                      <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                      <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                         {uploadingDogId === dog.id ? (
-                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
                         ) : (
-                          <Plus className="w-4 h-4 text-white" />
+                          <Plus className="w-5 h-5 text-white" />
                         )}
                       </div>
                     </div>
                     <div className="flex-1 min-w-0">
                       <h4 className="font-semibold text-sm sm:text-base truncate">{dog.name}</h4>
                       <p className="text-xs sm:text-sm text-muted-foreground truncate">
-                        {dog.breed} • {calculateAge(dog.birthDate)}
-                      </p>
-                      <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5 sm:mt-1 truncate">
-                        Nascimento: {formatBirthDate(dog.birthDate)}
+                        {dog.breed || "Não especificado"} • {calculateAge(dog.birthDate)}
                       </p>
                     </div>
                     <Button
                       size="icon"
                       variant="ghost"
-                      className="rounded-full text-muted-foreground hover:text-destructive hover:bg-destructive/10 flex-shrink-0 w-8 h-8 sm:w-9 sm:h-9"
+                      className="rounded-full text-muted-foreground hover:text-destructive flex-shrink-0"
                       onClick={(e) => {
                         e.stopPropagation()
                         onDeleteDog(dog.id)
                       }}
                     >
-                      <Trash2 className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
+                      <Trash2 className="w-4 h-4" />
                     </Button>
                   </div>
                 </Card>

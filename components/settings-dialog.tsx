@@ -7,67 +7,102 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card } from "@/components/ui/card"
 import { User, Mail, LogOut, Save } from "lucide-react"
-
-interface Owner {
-  id: string
-  name: string
-  age?: number | null
-  gender?: "masculino" | "feminino" | null
-}
+import { useOwnerProfile } from "@/lib/hooks/use-supabase-data"
+import { useAuth } from "@/lib/auth-context"
+import { useToast } from "@/hooks/use-toast"
+import confetti from "canvas-confetti"
 
 interface SettingsDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  owner: Owner | null
-  onOwnerUpdate: () => void
 }
 
-export function SettingsDialog({ open, onOpenChange, owner, onOwnerUpdate }: SettingsDialogProps) {
+export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
+  const { profile, loading, updateProfile } = useOwnerProfile()
+  const { signOut } = useAuth()
+  const { toast } = useToast()
+
   const [name, setName] = useState("")
   const [age, setAge] = useState("")
   const [gender, setGender] = useState<"masculino" | "feminino" | "">("")
   const [isSaving, setIsSaving] = useState(false)
 
   useEffect(() => {
-    if (owner) {
-      setName(owner.name || "")
-      setAge(owner.age?.toString() || "")
-      setGender(owner.gender || "")
+    if (profile) {
+      console.log("[v0] Loading settings from profile:", profile)
+      setName(profile.name || "")
+      setAge(profile.age?.toString() || "")
+      setGender((profile.gender as "masculino" | "feminino") || "")
     }
-  }, [owner])
+  }, [profile])
 
-  const handleSave = () => {
-    if (!owner?.id) return
+  const handleSave = async () => {
+    console.log("[v0] Save settings button clicked")
+
+    if (!profile?.id) {
+      console.error("[v0] No profile ID available")
+      toast({
+        title: "Erro",
+        description: "Perfil não encontrado",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (!name.trim()) {
+      toast({
+        title: "Erro",
+        description: "Por favor, preencha o nome",
+        variant: "destructive",
+      })
+      return
+    }
 
     setIsSaving(true)
 
     try {
-      const updatedOwner = {
-        ...owner,
-        name,
+      console.log("[v0] Updating profile with:", { name, age, gender })
+
+      await updateProfile({
+        name: name.trim(),
         age: age ? Number.parseInt(age) : null,
         gender: gender || null,
-      }
+      })
 
-      localStorage.setItem("owner", JSON.stringify(updatedOwner))
+      console.log("[v0] Settings saved successfully")
 
-      alert("Configurações salvas com sucesso!")
-      onOwnerUpdate()
+      confetti({
+        particleCount: 100,
+        spread: 70,
+        origin: { y: 0.6 },
+        colors: ["#60a5fa", "#3b82f6", "#2563eb"],
+      })
+
+      toast({
+        title: "Sucesso!",
+        description: "Configurações salvas com sucesso",
+      })
+
+      // Close dialog after short delay
+      setTimeout(() => {
+        onOpenChange(false)
+      }, 1000)
     } catch (err) {
-      console.error("[v0] Error updating owner:", err)
-      alert("Erro ao salvar configurações")
+      console.error("[v0] Error saving settings:", err)
+      toast({
+        title: "Erro",
+        description: "Erro ao salvar configurações. Tente novamente.",
+        variant: "destructive",
+      })
     } finally {
       setIsSaving(false)
     }
   }
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     if (confirm("Tem certeza que deseja sair da sua conta?")) {
-      localStorage.removeItem("ownerId")
-      localStorage.removeItem("owner")
-      localStorage.removeItem("dogs")
-      localStorage.removeItem("onboardingComplete")
-      localStorage.removeItem("calendarEvents")
+      console.log("[v0] User logging out")
+      await signOut()
       window.location.href = "/"
     }
   }
@@ -92,7 +127,13 @@ export function SettingsDialog({ open, onOpenChange, owner, onOwnerUpdate }: Set
             <div className="space-y-4">
               <div className="space-y-2">
                 <Label htmlFor="name">Nome</Label>
-                <Input id="name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Seu nome" />
+                <Input
+                  id="name"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Seu nome"
+                  disabled={loading}
+                />
               </div>
 
               <div className="space-y-2">
@@ -105,6 +146,7 @@ export function SettingsDialog({ open, onOpenChange, owner, onOwnerUpdate }: Set
                   placeholder="Sua idade"
                   min="1"
                   max="120"
+                  disabled={loading}
                 />
               </div>
 
@@ -116,6 +158,7 @@ export function SettingsDialog({ open, onOpenChange, owner, onOwnerUpdate }: Set
                     variant={gender === "masculino" ? "default" : "outline"}
                     className="flex-1"
                     onClick={() => setGender("masculino")}
+                    disabled={loading}
                   >
                     Masculino
                   </Button>
@@ -124,13 +167,14 @@ export function SettingsDialog({ open, onOpenChange, owner, onOwnerUpdate }: Set
                     variant={gender === "feminino" ? "default" : "outline"}
                     className="flex-1"
                     onClick={() => setGender("feminino")}
+                    disabled={loading}
                   >
                     Feminino
                   </Button>
                 </div>
               </div>
 
-              <Button onClick={handleSave} disabled={isSaving} className="w-full">
+              <Button onClick={handleSave} disabled={isSaving || loading} className="w-full cursor-pointer">
                 <Save className="w-4 h-4 mr-2" />
                 {isSaving ? "Salvando..." : "Salvar Alterações"}
               </Button>
