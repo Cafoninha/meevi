@@ -127,7 +127,7 @@ export function AuthDialog({ open, onOpenChange }: AuthDialogProps) {
               minLength={6}
               autoComplete={isLogin ? "current-password" : "new-password"}
             />
-            {!isLogin && <p className="text-xs text-muted-foreground">Mínimo de 6 caracteres</p>}
+            {!isLogin && <p className="text-xs text-muted-foreground">A senha deve ter pelo menos uma letra maiúscula, uma minúscula e um caractere especial</p>}
           </div>
 
           {error && <div className="p-3 text-sm text-red-600 bg-red-50 rounded-md border border-red-200">{error}</div>}
