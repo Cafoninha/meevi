@@ -100,7 +100,7 @@ const essentials: Essential[] = [
     category: "bath",
     title: "Banho Regular",
     description: "Banhos frequentes para manter a pelagem limpa e saudável",
-    frequency: "A cada 7-15 dias",
+    frequency: "A cada 15-30 dias",
     tips: [
       "Use shampoo específico para cães",
       "Água morna, nunca quente",
