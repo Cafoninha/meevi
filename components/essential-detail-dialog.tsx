@@ -44,7 +44,7 @@ export function EssentialDetailDialog({ essential, open, onOpenChange }: Essenti
             <Clock className="w-5 h-5 text-primary flex-shrink-0" />
             <div>
               <p className="text-sm font-medium">Frequência Recomendada</p>
-              <p className="text-sm text-muted-foreground">{essential.frequency}</p>
+              <p className="text-sm text-muted-foreground">{"Pelo menos 3 vezes por semana, mas o ideal é que seja diária"}</p>
             </div>
           </div>
 

@@ -117,6 +117,8 @@ const essentials: Essential[] = [
     frequency: "Diariamente",
     tips: [
       "Escove pelo menos uma vez ao dia",
+      "A escova correta para o Spitz Alemão é a Escova de Pinos Sem Bolinhas (ou Sem Ponta), especialmente durante a troca de pelos",
+      "Fluido desembaraçador: ajuda a soltar nós, facilita a escovação e reduz a quebra dos fios, mantendo a pelagem do Spitz Alemão macia, alinhada e saudável. Deve ser usado antes da escovação",
       "Use escova adequada para pelagem dupla",
       "Fique atento a nós e embaraços",
       "Durante a troca de pelo, escove 2x ao dia",
@@ -128,7 +130,7 @@ const essentials: Essential[] = [
     category: "grooming",
     title: "Tosa Higiênica",
     description: "Apara pelos das patas, orelhas e região íntima",
-    frequency: "A cada 4-6 semanas",
+    frequency: "A cada 6-8 semanas",
     tips: [
       "Mantenha pelos das patas aparados",
       "Apare pelos ao redor das orelhas",
