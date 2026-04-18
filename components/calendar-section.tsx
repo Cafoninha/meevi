@@ -5,12 +5,20 @@ import { Button } from "@/components/ui/button"
 import { Card } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Plus, ChevronLeft, ChevronRight, CalendarIcon, Check, Clock } from "lucide-react"
+import { Plus, ChevronLeft, ChevronRight, CalendarIcon, Check, Clock, ChevronDown } from "lucide-react"
 import { AddEventDialog } from "@/components/add-event-dialog"
 import { EventCard } from "@/components/event-card"
 import { useToast } from "@/hooks/use-toast"
 import { cn } from "@/lib/utils"
 import { Calendar } from "lucide-react"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuCheckboxItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
+import { useDogs } from "@/lib/hooks/use-supabase-data"
 
 export interface CalendarEvent {
   id: string
@@ -35,7 +43,6 @@ interface Dog {
 
 export default function CalendarSection() {
   const [events, setEvents] = useState<CalendarEvent[]>([])
-  const [dogs, setDogs] = useState<Dog[]>([])
   const [selectedDogId, setSelectedDogId] = useState<string>("all")
   const [filterType, setFilterType] = useState<string>("all")
   const [showAddDialog, setShowAddDialog] = useState(false)
@@ -43,22 +50,14 @@ export default function CalendarSection() {
   const [isLoading, setIsLoading] = useState(true)
   const { toast } = useToast()
   const [selectedDate, setSelectedDate] = useState<Date | null>(null)
+  const [showDogMenu, setShowDogMenu] = useState(false)
+  
+  // Use Supabase hook
+  const { dogs: supabaseDogs } = useDogs()
 
   useEffect(() => {
-    loadDogs()
     loadEvents()
   }, [])
-
-  const loadDogs = () => {
-    try {
-      const storedDogs = localStorage.getItem("dogs")
-      if (storedDogs) {
-        setDogs(JSON.parse(storedDogs))
-      }
-    } catch (error) {
-      console.error("[v0] Error loading dogs:", error)
-    }
-  }
 
   const loadEvents = () => {
     try {
@@ -222,19 +221,44 @@ export default function CalendarSection() {
 
         <div className="grid grid-cols-2 gap-2 sm:gap-3 mt-3 sm:mt-4">
           <div>
-            <Select value={selectedDogId} onValueChange={setSelectedDogId}>
-              <SelectTrigger className="h-9 sm:h-10 text-xs sm:text-sm">
-                <SelectValue placeholder="Todos os cachorros" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Todos os cachorros</SelectItem>
-                {dogs.map((dog) => (
-                  <SelectItem key={dog.id} value={dog.id}>
+            <DropdownMenu open={showDogMenu} onOpenChange={setShowDogMenu}>
+              <DropdownMenuTrigger asChild>
+                <Button 
+                  variant="outline" 
+                  className="w-full h-9 sm:h-10 text-xs sm:text-sm justify-between border-input data-[placeholder]:text-muted-foreground"
+                >
+                  <span>
+                    {selectedDogId === "all" 
+                      ? "Todos os cachorros" 
+                      : supabaseDogs.find((d) => d.id === selectedDogId)?.name || "Selecione"}
+                  </span>
+                  <ChevronDown className="w-4 h-4 ml-2 flex-shrink-0" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-[calc(100vw-2rem)] sm:w-56">
+                <DropdownMenuCheckboxItem
+                  checked={selectedDogId === "all"}
+                  onCheckedChange={() => {
+                    setSelectedDogId("all")
+                    setShowDogMenu(false)
+                  }}
+                >
+                  Todos os cachorros
+                </DropdownMenuCheckboxItem>
+                {supabaseDogs.map((dog) => (
+                  <DropdownMenuCheckboxItem
+                    key={dog.id}
+                    checked={selectedDogId === dog.id}
+                    onCheckedChange={() => {
+                      setSelectedDogId(dog.id)
+                      setShowDogMenu(false)
+                    }}
+                  >
                     {dog.name}
-                  </SelectItem>
+                  </DropdownMenuCheckboxItem>
                 ))}
-              </SelectContent>
-            </Select>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
           <div>
             <Select value={filterType} onValueChange={(value: any) => setFilterType(value)}>
@@ -433,7 +457,7 @@ export default function CalendarSection() {
       </div>
 
       {/* Add Event Dialog */}
-      <AddEventDialog open={showAddDialog} onOpenChange={setShowAddDialog} onAdd={handleAddEvent} dogs={dogs} />
+      <AddEventDialog open={showAddDialog} onOpenChange={setShowAddDialog} onAdd={handleAddEvent} dogs={supabaseDogs} />
     </div>
   )
 }

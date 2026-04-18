@@ -1393,3 +1393,160 @@ export function useOwnerProfile() {
     refreshProfile: loadProfile,
   }
 }
+
+export interface DocumentRecord {
+  id: string
+  dog_id: string
+  type: string
+  title: string
+  notes?: string
+  issue_date?: string
+  expiry_date?: string
+  file_url?: string
+  owner_id: string
+}
+
+export function useDocuments() {
+  const [documents, setDocuments] = useState<DocumentRecord[]>([])
+  const [loading, setLoading] = useState(true)
+  const { user } = useAuth()
+  const supabase = createClient()
+
+  useEffect(() => {
+    if (!user) {
+      setDocuments([])
+      setLoading(false)
+      return
+    }
+
+    loadDocuments()
+
+    const channel = supabase
+      .channel("documents_changes")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "documents", filter: `owner_id=eq.${user.id}` },
+        () => {
+          console.log("[v0] Documents changed, reloading...")
+          loadDocuments()
+        }
+      )
+      .subscribe()
+
+    return () => {
+      channel.unsubscribe()
+    }
+  }, [user])
+
+  async function loadDocuments() {
+    if (!user) return
+
+    try {
+      console.log("[v0] Loading documents...")
+      const { data, error } = await supabase
+        .from("documents")
+        .select("*")
+        .eq("owner_id", user.id)
+        .order("created_at", { ascending: false })
+
+      if (error) throw error
+
+      const formattedDocuments: DocumentRecord[] =
+        data?.map((doc) => ({
+          id: doc.id,
+          dog_id: doc.dog_id,
+          type: doc.type,
+          title: doc.title,
+          notes: doc.notes,
+          issue_date: doc.issue_date,
+          expiry_date: doc.expiry_date,
+          file_url: doc.file_url,
+          owner_id: doc.owner_id,
+        })) || []
+
+      console.log("[v0] Loaded documents:", formattedDocuments.length)
+      setDocuments(formattedDocuments)
+    } catch (error) {
+      console.error("[v0] Error loading documents:", error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function addDocument(doc: Omit<DocumentRecord, "id" | "owner_id">) {
+    if (!user) return
+
+    try {
+      console.log("[v0] Adding document...")
+      const { data, error } = await supabase
+        .from("documents")
+        .insert([
+          {
+            owner_id: user.id,
+            dog_id: doc.dog_id,
+            type: doc.type,
+            title: doc.title,
+            notes: doc.notes,
+            issue_date: doc.issue_date,
+            expiry_date: doc.expiry_date,
+            file_url: doc.file_url,
+          },
+        ])
+        .select()
+
+      if (error) throw error
+
+      console.log("[v0] Document added successfully:", data)
+      await loadDocuments()
+      return data?.[0]
+    } catch (error) {
+      console.error("[v0] Error adding document:", error)
+      throw error
+    }
+  }
+
+  async function updateDocument(id: string, updates: Partial<DocumentRecord>) {
+    if (!user) return
+
+    try {
+      const { error } = await supabase
+        .from("documents")
+        .update({
+          type: updates.type,
+          title: updates.title,
+          notes: updates.notes,
+          issue_date: updates.issue_date,
+          expiry_date: updates.expiry_date,
+          file_url: updates.file_url,
+        })
+        .eq("id", id)
+        .eq("owner_id", user.id)
+
+      if (error) throw error
+
+      console.log("[v0] Document updated successfully")
+      await loadDocuments()
+    } catch (error) {
+      console.error("[v0] Error updating document:", error)
+      throw error
+    }
+  }
+
+  async function deleteDocument(id: string) {
+    if (!user) return
+
+    try {
+      const { error } = await supabase.from("documents").delete().eq("id", id).eq("owner_id", user.id)
+
+      if (error) throw error
+
+      console.log("[v0] Document deleted successfully")
+      await loadDocuments()
+    } catch (error) {
+      console.error("[v0] Error deleting document:", error)
+      throw error
+    }
+  }
+
+  return { documents, loading, addDocument, updateDocument, deleteDocument, refreshDocuments: loadDocuments }
+}
