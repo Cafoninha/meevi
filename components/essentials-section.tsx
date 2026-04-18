@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import { Card } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -28,9 +28,18 @@ import {
   Building2,
   Clock,
   User,
+  Camera,
+  Upload,
+  Image as ImageIcon,
+  X,
+  Loader2,
+  Eye,
 } from "lucide-react"
 import { EssentialDetailDialog } from "@/components/essential-detail-dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { useDocuments, type DocumentRecord } from "@/lib/hooks/use-supabase-data"
+import { useDogs } from "@/lib/hooks/use-supabase-data"
+import { useAuth } from "@/lib/auth-context"
 
 export interface Essential {
   id: string
@@ -62,6 +71,7 @@ interface DogDocument {
   date: string
   fileUrl?: string
   notes?: string
+  expiryDate?: string
 }
 
 type TabType = "contacts" | "documents" | "guides"
@@ -247,38 +257,41 @@ function EssentialsSection() {
   const [searchQuery, setSearchQuery] = useState("")
   const [selectedEssential, setSelectedEssential] = useState<Essential | null>(null)
   const [contacts, setContacts] = useState<EmergencyContact[]>([])
-  const [documents, setDocuments] = useState<DogDocument[]>([])
-  const [dogs, setDogs] = useState<Array<{ id: string; name: string }>>([])
   const [showContactDialog, setShowContactDialog] = useState(false)
   const [showDocumentDialog, setShowDocumentDialog] = useState(false)
   const [editingContact, setEditingContact] = useState<EmergencyContact | null>(null)
   const [editingDocument, setEditingDocument] = useState<DogDocument | null>(null)
+  const [viewingImage, setViewingImage] = useState<string | null>(null)
+  
+  // Use Supabase hooks
+  const { dogs, loading: dogsLoading } = useDogs()
+  const { 
+    documents: supabaseDocuments, 
+    loading: documentsLoading, 
+    addDocument, 
+    updateDocument, 
+    deleteDocument 
+  } = useDocuments()
+  const { user } = useAuth()
+
+  // Convert Supabase documents to local format
+  const documents: DogDocument[] = supabaseDocuments.map((doc) => ({
+    id: doc.id,
+    dogId: doc.dog_id,
+    type: doc.type as DogDocument["type"],
+    title: doc.title,
+    date: doc.issue_date || new Date().toISOString().split("T")[0],
+    fileUrl: doc.file_url,
+    notes: doc.notes,
+    expiryDate: doc.expiry_date,
+  }))
 
   useEffect(() => {
     const storedContacts = localStorage.getItem("meevi_emergency_contacts")
     if (storedContacts) {
       setContacts(JSON.parse(storedContacts))
     }
-
-    const storedDocuments = localStorage.getItem("meevi_dog_documents")
-    if (storedDocuments) {
-      setDocuments(JSON.parse(storedDocuments))
-    }
-
-    const storedDogs = localStorage.getItem("dogs")
-    if (storedDogs) {
-      setDogs(JSON.parse(storedDogs))
-    }
   }, [])
-
-  useEffect(() => {
-    if (showDocumentDialog || showContactDialog) {
-      const storedDogs = localStorage.getItem("dogs")
-      if (storedDogs) {
-        setDogs(JSON.parse(storedDogs))
-      }
-    }
-  }, [showDocumentDialog, showContactDialog])
 
   const saveContact = (contact: Omit<EmergencyContact, "id">) => {
     const newContact = {
@@ -302,26 +315,47 @@ function EssentialsSection() {
     localStorage.setItem("meevi_emergency_contacts", JSON.stringify(updated))
   }
 
-  const saveDocument = (doc: Omit<DogDocument, "id">) => {
-    const newDoc = {
-      ...doc,
-      id: Date.now().toString(),
+  // Document functions now use Supabase via hook
+  const handleSaveDocument = async (doc: Omit<DogDocument, "id">) => {
+    try {
+      await addDocument({
+        dog_id: doc.dogId,
+        type: doc.type,
+        title: doc.title,
+        notes: doc.notes,
+        issue_date: doc.date,
+        expiry_date: doc.expiryDate,
+        file_url: doc.fileUrl,
+      })
+    } catch (error) {
+      console.error("[v0] Error saving document:", error)
+      throw error
     }
-    const updated = [...documents, newDoc]
-    setDocuments(updated)
-    localStorage.setItem("meevi_dog_documents", JSON.stringify(updated))
   }
 
-  const updateDocument = (id: string, doc: Partial<DogDocument>) => {
-    const updated = documents.map((d) => (d.id === id ? { ...d, ...doc } : d))
-    setDocuments(updated)
-    localStorage.setItem("meevi_dog_documents", JSON.stringify(updated))
+  const handleUpdateDocument = async (id: string, doc: Partial<DogDocument>) => {
+    try {
+      await updateDocument(id, {
+        type: doc.type,
+        title: doc.title,
+        notes: doc.notes,
+        issue_date: doc.date,
+        expiry_date: doc.expiryDate,
+        file_url: doc.fileUrl,
+      })
+    } catch (error) {
+      console.error("[v0] Error updating document:", error)
+      throw error
+    }
   }
 
-  const deleteDocument = (id: string) => {
-    const updated = documents.filter((d) => d.id !== id)
-    setDocuments(updated)
-    localStorage.setItem("meevi_dog_documents", JSON.stringify(updated))
+  const handleDeleteDocument = async (id: string) => {
+    try {
+      await deleteDocument(id)
+    } catch (error) {
+      console.error("[v0] Error deleting document:", error)
+      throw error
+    }
   }
 
   const filteredEssentials = essentials.filter((essential) => {
@@ -367,7 +401,7 @@ function EssentialsSection() {
       </div>
 
       {activeTab === "contacts" && (
-        <div className="space-y-4 sm:space-y-6">
+        <div className="px-3 sm:px-4 md:px-6 py-4 space-y-4 sm:space-y-6">
           <div className="flex items-center justify-between">
             <h3 className="text-base sm:text-lg font-bold">Contatos de Emergência</h3>
             <Button onClick={() => setShowContactDialog(true)} size="sm">
@@ -454,9 +488,9 @@ function EssentialsSection() {
         </div>
       )}
 
-      {activeTab === "documents" && (
-        <div className="space-y-4 sm:space-y-6">
-          <div className="flex items-center justify-between">
+{activeTab === "documents" && (
+  <div className="px-3 sm:px-4 md:px-6 py-4 space-y-4 sm:space-y-6">
+  <div className="flex items-center justify-between">
             <h3 className="text-base sm:text-lg font-bold">Documentos dos Cachorros</h3>
             <Button onClick={() => setShowDocumentDialog(true)} size="sm">
               <Plus className="w-4 h-4 mr-2" />
@@ -488,12 +522,30 @@ function EssentialsSection() {
                       {dogDocs.map((doc) => {
                         const typeInfo = documentTypes.find((t) => t.value === doc.type)
                         const Icon = typeInfo?.icon || FileText
+                        const hasImage = doc.fileUrl && !doc.fileUrl.endsWith('.pdf')
                         return (
                           <Card key={doc.id} className="p-3 sm:p-4">
                             <div className="flex items-start gap-2 sm:gap-3">
-                              <div className="w-9 h-9 sm:w-10 sm:h-10 bg-primary/10 rounded-lg flex items-center justify-center flex-shrink-0">
-                                <Icon className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
-                              </div>
+                              {/* Thumbnail ou ícone */}
+                              {hasImage ? (
+                                <div 
+                                  className="w-16 h-16 sm:w-20 sm:h-20 rounded-lg overflow-hidden flex-shrink-0 cursor-pointer relative group"
+                                  onClick={() => setViewingImage(doc.fileUrl!)}
+                                >
+                                  <img 
+                                    src={doc.fileUrl} 
+                                    alt={doc.title}
+                                    className="w-full h-full object-cover"
+                                  />
+                                  <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                    <Eye className="w-5 h-5 text-white" />
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className="w-9 h-9 sm:w-10 sm:h-10 bg-primary/10 rounded-lg flex items-center justify-center flex-shrink-0">
+                                  <Icon className="w-4 h-4 sm:w-5 sm:h-5 text-primary" />
+                                </div>
+                              )}
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-start justify-between gap-2">
                                   <div className="flex-1 min-w-0">
@@ -501,11 +553,6 @@ function EssentialsSection() {
                                     <p className="text-[10px] sm:text-xs text-muted-foreground mt-0.5">
                                       {typeInfo?.label}
                                     </p>
-                                    {doc.description && (
-                                      <p className="text-xs sm:text-sm text-muted-foreground mt-1 sm:mt-2 line-clamp-2">
-                                        {doc.description}
-                                      </p>
-                                    )}
                                     <div className="flex items-center gap-2 mt-2">
                                       <Clock className="w-3.5 h-3.5 text-muted-foreground" />
                                       <span className="text-xs sm:text-sm text-muted-foreground">
@@ -513,12 +560,33 @@ function EssentialsSection() {
                                       </span>
                                     </div>
                                     {doc.notes && (
-                                      <p className="text-xs sm:text-sm text-muted-foreground mt-2 italic">
+                                      <p className="text-xs sm:text-sm text-muted-foreground mt-2 italic line-clamp-2">
                                         {doc.notes}
                                       </p>
                                     )}
+                                    {doc.fileUrl && (
+                                      <div className="flex items-center gap-2 mt-2">
+                                        <ImageIcon className="w-3.5 h-3.5 text-green-600" />
+                                        <span className="text-xs text-green-600 font-medium">Documento anexado</span>
+                                      </div>
+                                    )}
                                   </div>
-                                  <div className="flex gap-1">
+                                  <div className="flex flex-col gap-1">
+                                    {doc.fileUrl && (
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => {
+                                          if (doc.fileUrl?.endsWith('.pdf')) {
+                                            window.open(doc.fileUrl, '_blank')
+                                          } else {
+                                            setViewingImage(doc.fileUrl!)
+                                          }
+                                        }}
+                                      >
+                                        <Eye className="w-4 h-4" />
+                                      </Button>
+                                    )}
                                     <Button
                                       variant="ghost"
                                       size="sm"
@@ -529,7 +597,7 @@ function EssentialsSection() {
                                     >
                                       <Edit2 className="w-4 h-4" />
                                     </Button>
-                                    <Button variant="ghost" size="sm" onClick={() => deleteDocument(doc.id)}>
+                                    <Button variant="ghost" size="sm" onClick={() => handleDeleteDocument(doc.id)}>
                                       <Trash2 className="w-4 h-4 text-destructive" />
                                     </Button>
                                   </div>
@@ -662,16 +730,43 @@ function EssentialsSection() {
         }}
         document={editingDocument}
         dogs={dogs}
-        onSave={(doc) => {
-          if (editingDocument) {
-            updateDocument(editingDocument.id, doc)
-          } else {
-            saveDocument(doc)
+        onSave={async (doc) => {
+          try {
+            if (editingDocument) {
+              await handleUpdateDocument(editingDocument.id, doc)
+            } else {
+              await handleSaveDocument(doc)
+            }
+            setShowDocumentDialog(false)
+            setEditingDocument(null)
+          } catch (error) {
+            console.error("[v0] Error saving document:", error)
           }
-          setShowDocumentDialog(false)
-          setEditingDocument(null)
         }}
       />
+
+      {/* Image Viewer Dialog */}
+      {viewingImage && (
+        <Dialog open={!!viewingImage} onOpenChange={() => setViewingImage(null)}>
+          <DialogContent className="sm:max-w-3xl max-h-[90vh] p-0 overflow-hidden">
+            <div className="relative">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="absolute top-2 right-2 z-10 bg-black/50 hover:bg-black/70 text-white"
+                onClick={() => setViewingImage(null)}
+              >
+                <X className="w-4 h-4" />
+              </Button>
+              <img 
+                src={viewingImage} 
+                alt="Documento"
+                className="w-full h-auto max-h-[85vh] object-contain"
+              />
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
 
       {/* Detail Dialog */}
       {selectedEssential && (
@@ -833,7 +928,13 @@ function DocumentDialog({
     description: "",
     date: new Date().toISOString().split("T")[0],
     notes: "",
+    fileUrl: "",
+    expiryDate: "",
   })
+  const [uploading, setUploading] = useState(false)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const cameraInputRef = useRef<HTMLInputElement>(null)
 
   useEffect(() => {
     if (document) {
@@ -844,7 +945,10 @@ function DocumentDialog({
         description: document.description || "",
         date: document.date,
         notes: document.notes || "",
+        fileUrl: document.fileUrl || "",
+        expiryDate: document.expiryDate || "",
       })
+      setPreviewUrl(document.fileUrl || null)
     } else {
       setFormData({
         dogId: "",
@@ -853,9 +957,60 @@ function DocumentDialog({
         description: "",
         date: new Date().toISOString().split("T")[0],
         notes: "",
+        fileUrl: "",
+        expiryDate: "",
       })
+      setPreviewUrl(null)
     }
   }, [document, open, dogs])
+
+  const handleFileUpload = async (file: File) => {
+    if (!formData.dogId) {
+      alert("Por favor, selecione um cachorro primeiro")
+      return
+    }
+
+    setUploading(true)
+    try {
+      const uploadFormData = new FormData()
+      uploadFormData.append("file", file)
+      uploadFormData.append("dogId", formData.dogId)
+      uploadFormData.append("documentType", formData.type)
+
+      const response = await fetch("/api/upload-document", {
+        method: "POST",
+        body: uploadFormData,
+      })
+
+      const result = await response.json()
+
+      if (!response.ok) {
+        throw new Error(result.error || "Erro ao fazer upload")
+      }
+
+      setFormData((prev) => ({ ...prev, fileUrl: result.url }))
+      setPreviewUrl(result.url)
+    } catch (error) {
+      console.error("[v0] Upload error:", error)
+      alert(error instanceof Error ? error.message : "Erro ao fazer upload do arquivo")
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      handleFileUpload(file)
+    }
+  }
+
+  const removeImage = () => {
+    setFormData((prev) => ({ ...prev, fileUrl: "" }))
+    setPreviewUrl(null)
+    if (fileInputRef.current) fileInputRef.current.value = ""
+    if (cameraInputRef.current) cameraInputRef.current.value = ""
+  }
 
   const handleSubmit = () => {
     if (!formData.dogId || formData.dogId === "all") {
@@ -881,7 +1036,10 @@ function DocumentDialog({
       description: "",
       date: new Date().toISOString().split("T")[0],
       notes: "",
+      fileUrl: "",
+      expiryDate: "",
     })
+    setPreviewUrl(null)
   }
 
   return (
@@ -979,16 +1137,111 @@ function DocumentDialog({
             />
           </div>
 
+          {/* Upload de Foto/Documento */}
+          <div>
+            <Label>Foto do Documento</Label>
+            <div className="mt-2">
+              {previewUrl ? (
+                <div className="relative">
+                  <div className="relative w-full h-48 rounded-lg overflow-hidden border border-border">
+                    <img 
+                      src={previewUrl} 
+                      alt="Preview do documento"
+                      className="w-full h-full object-contain bg-muted"
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    size="sm"
+                    className="absolute top-2 right-2"
+                    onClick={removeImage}
+                  >
+                    <X className="w-4 h-4" />
+                  </Button>
+                </div>
+              ) : (
+                <div className="border-2 border-dashed border-border rounded-lg p-6 text-center">
+                  {uploading ? (
+                    <div className="flex flex-col items-center gap-2">
+                      <Loader2 className="w-8 h-8 text-primary animate-spin" />
+                      <p className="text-sm text-muted-foreground">Enviando documento...</p>
+                    </div>
+                  ) : (
+                    <>
+                      <ImageIcon className="w-10 h-10 text-muted-foreground mx-auto mb-3" />
+                      <p className="text-sm text-muted-foreground mb-3">
+                        Tire uma foto ou selecione um arquivo
+                      </p>
+                      <div className="flex flex-col sm:flex-row gap-2 justify-center">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => cameraInputRef.current?.click()}
+                          disabled={!formData.dogId}
+                          className="flex items-center gap-2"
+                        >
+                          <Camera className="w-4 h-4" />
+                          Tirar Foto
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => fileInputRef.current?.click()}
+                          disabled={!formData.dogId}
+                          className="flex items-center gap-2"
+                        >
+                          <Upload className="w-4 h-4" />
+                          Carregar Arquivo
+                        </Button>
+                      </div>
+                      {!formData.dogId && (
+                        <p className="text-xs text-amber-600 mt-2">
+                          Selecione um cachorro primeiro para enviar o documento
+                        </p>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+              {/* Hidden file inputs */}
+              <input
+                ref={cameraInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                onChange={handleFileChange}
+              />
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*,application/pdf"
+                className="hidden"
+                onChange={handleFileChange}
+              />
+            </div>
+          </div>
+
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => onOpenChange(false)} className="flex-1">
               Cancelar
             </Button>
             <Button
               onClick={handleSubmit}
-              disabled={!formData.dogId || formData.dogId === "all" || !formData.title}
+              disabled={!formData.dogId || formData.dogId === "all" || !formData.title || uploading}
               className="flex-1"
             >
-              Salvar
+              {uploading ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Enviando...
+                </>
+              ) : (
+                "Salvar"
+              )}
             </Button>
           </div>
         </div>
