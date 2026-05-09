@@ -1023,6 +1023,11 @@ function DocumentDialog({
       return
     }
 
+    if (!formData.fileUrl) {
+      alert("Por favor, adicione uma foto do documento")
+      return
+    }
+
     onSave(formData)
 
     // Close dialog after saving
@@ -1139,7 +1144,7 @@ function DocumentDialog({
 
           {/* Upload de Foto/Documento */}
           <div>
-            <Label>Foto do Documento</Label>
+            <Label>Foto do Documento *</Label>
             <div className="mt-2">
               {previewUrl ? (
                 <div className="relative">
@@ -1150,15 +1155,32 @@ function DocumentDialog({
                       className="w-full h-full object-contain bg-muted"
                     />
                   </div>
-                  <Button
-                    type="button"
-                    variant="destructive"
-                    size="sm"
-                    className="absolute top-2 right-2"
-                    onClick={removeImage}
-                  >
-                    <X className="w-4 h-4" />
-                  </Button>
+                  <div className="absolute top-2 right-2 flex gap-1">
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="bg-black/50 hover:bg-black/70 text-white"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={uploading}
+                    >
+                      <Edit2 className="w-4 h-4" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      size="sm"
+                      onClick={removeImage}
+                      disabled={uploading}
+                    >
+                      <X className="w-4 h-4" />
+                    </Button>
+                  </div>
+                  {uploading && (
+                    <div className="absolute inset-0 bg-black/50 flex items-center justify-center rounded-lg">
+                      <Loader2 className="w-8 h-8 text-white animate-spin" />
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div className="border-2 border-dashed border-border rounded-lg p-6 text-center">
@@ -1225,13 +1247,20 @@ function DocumentDialog({
             </div>
           </div>
 
+          {/* Aviso se não houver foto */}
+          {!formData.fileUrl && formData.dogId && formData.title && (
+            <p className="text-xs text-amber-600 text-center">
+              Adicione uma foto do documento para ativar o botão Salvar
+            </p>
+          )}
+
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => onOpenChange(false)} className="flex-1">
               Cancelar
             </Button>
             <Button
               onClick={handleSubmit}
-              disabled={!formData.dogId || formData.dogId === "all" || !formData.title || uploading}
+              disabled={!formData.dogId || formData.dogId === "all" || !formData.title || !formData.fileUrl || uploading}
               className="flex-1"
             >
               {uploading ? (
